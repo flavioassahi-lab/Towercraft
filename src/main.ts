@@ -181,7 +181,7 @@ type SpawnSpec = { kind: EnemyKind; tier: Tier; route?: 'left' | 'right' };
 // SOM (sintetizado no navegador, sem arquivos)
 // ==================================================
 
-type Ambience = 'title' | 'primitive' | 'greece' | 'tech' | 'real' | 'sky';
+type Ambience = 'intro' | 'title' | 'primitive' | 'greece' | 'tech' | 'real' | 'sky';
 
 type SfxName =
   | 'click' | 'slash' | 'arrow' | 'orb' | 'fusedorb'
@@ -463,7 +463,9 @@ const SFX = (() => {
         [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(f, 0.3, 'triangle', 0.28, { delay: i * 0.16 }));
         break;
       case 'swoosh':
-        noise(0.7, 0.45, 400, 'bandpass', { to: 6000, q: 1.5 });
+        noise(0.8, 0.6, 400, 'bandpass', { to: 7000, q: 1.5 });
+        tone(600, 0.7, 'sine', 0.25, { to: 2400 });
+        [1568, 2093, 2637].forEach((f, i) => tone(f, 0.35, 'triangle', 0.16, { delay: 0.25 + i * 0.1 }));
         break;
       case 'logo':
         [880, 1318, 1760].forEach((f, i) => tone(f, 0.5, 'triangle', 0.22, { delay: i * 0.12 }));
@@ -678,6 +680,25 @@ const SFX = (() => {
 
           m(f * 2, 2.5, 'sine', 0.3);
           m(f * 3.01, 2.0, 'sine', 0.1);
+        };
+        break;
+      }
+      case 'intro': {
+        drone(110, 'triangle', 0.18, 500);
+        drone(165, 'sine', 0.12, 600);
+        tempo = 300;
+        stepFn = i => {
+          const mel = [440, 0, 523, 0, 659, 0, 587, 523, 494, 0, 523, 0, 440, 0, 392, 0,
+            440, 0, 523, 0, 659, 0, 784, 659, 587, 0, 523, 0, 494, 0, 440, 0];
+          const f = mel[i % mel.length];
+
+          if (f) {
+            m(f, 0.55, 'triangle', 0.45, { attack: 0.01 });
+            m(f * 2, 0.3, 'sine', 0.12, { attack: 0.01 });
+          }
+
+          if (i % 4 === 0) m(110, 0.6, 'sine', 0.55, { to: 100 });
+          if (i % 8 === 4) m(70, 0.25, 'sine', 0.7, { to: 40 });
         };
         break;
       }
@@ -917,6 +938,8 @@ const PIX_PACKS = [
 
 // Diamantes: moeda que só vem do PIX.
 const DIAMOND_KEY = 'towercraft_diamonds_v1';
+
+const AURA_RANGE = 190;
 
 const DIAMOND_COST = { tower: 15, pet: 15, ult: 20, cast: 5, life: 5 };
 
@@ -2823,6 +2846,7 @@ class GameScene extends BaseScene {
   private healthLayer!: Phaser.GameObjects.Graphics;
 
   private coinText!: Phaser.GameObjects.Text;
+  private diaText!: Phaser.GameObjects.Text;
   private baseText!: Phaser.GameObjects.Text;
   private waveText!: Phaser.GameObjects.Text;
   private enemyText!: Phaser.GameObjects.Text;
@@ -4963,8 +4987,9 @@ class GameScene extends BaseScene {
     this.drawGem(ui, 584, 18, 3, GOLD_LIGHT);
 
     // Placas dos recursos
-    this.drawBarPlate(ui, 8, 44, 112, 20);
-    this.drawBarPlate(ui, 128, 44, 192, 20);
+    this.drawBarPlate(ui, 8, 44, 78, 20);
+    this.drawBarPlate(ui, 90, 44, 76, 20);
+    this.drawBarPlate(ui, 170, 44, 152, 20);
     this.drawBarPlate(ui, 368, 44, 224, 20);
     this.drawBarPlate(ui, 8, 70, 290, 20);
     this.drawBarPlate(ui, 306, 70, 244, 20);
@@ -5014,6 +5039,25 @@ class GameScene extends BaseScene {
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(22);
 
+    // Diamante
+    ui.fillStyle(0x1f5f8f, 1);
+    ui.fillTriangle(104, 51, 112, 51, 108, 59);
+    ui.fillStyle(0x6fd8ff, 1);
+    ui.fillTriangle(100, 51, 116, 51, 108, 62);
+    ui.fillStyle(0xdff8ff, 0.9);
+    ui.fillTriangle(104, 51, 108, 51, 106, 55);
+    ui.lineStyle(1, 0x1f5f8f, 1);
+    ui.strokeTriangle(100, 51, 116, 51, 108, 62);
+
+    this.diaText = this.add.text(122, 54, `${this.diamonds}`, {
+      fontFamily: 'Georgia, serif',
+      fontSize: '13px',
+      color: '#9fe8ff',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0, 0.5).setDepth(22);
+
     this.coinText = this.add.text(36, 54, '0', {
       fontFamily: 'Georgia, serif',
       fontSize: '13px',
@@ -5032,7 +5076,7 @@ class GameScene extends BaseScene {
       strokeThickness: 3,
     };
 
-    this.baseText = this.add.text(224, 54, '', barStyle)
+    this.baseText = this.add.text(246, 54, '', barStyle)
       .setOrigin(0.5).setDepth(22);
 
     this.enemyText = this.add.text(480, 54, '', {
@@ -5073,8 +5117,8 @@ class GameScene extends BaseScene {
     );
 
     this.makeButton(
-      324, 44, '+10♥', '#8a2c3c',
-      () => this.buyLife(), 11, 40, 20,
+      326, 44, '+10♥', '#8a2c3c',
+      () => this.buyLife(), 11, 38, 20,
     ).setDepth(22);
 
     this.makeButton(
@@ -5743,8 +5787,8 @@ class GameScene extends BaseScene {
       return {
         name: 'AURA',
         description: this.fused
-          ? 'Passiva: reforça TODAS as torres (x1,5).'
-          : `Passiva: reforça só as torres ${TOWER_STATS[HERO_STATS[this.heroKind].specialty].name}.`,
+          ? 'Passiva: reforça TODAS as torres perto do herói (x1,5).'
+          : `Passiva: reforça as torres ${TOWER_STATS[HERO_STATS[this.heroKind].specialty].name} perto do herói.`,
         mana: 0,
       };
     }
@@ -5803,7 +5847,7 @@ class GameScene extends BaseScene {
     const needDia = tower.level === 5 && !this.lv6[tower.kind];
 
     // Valores base + bônus da AURA em verde (ex.: Dano: 20 +4).
-    const boost = this.auraFor(tower.kind);
+    const boost = this.auraFor(tower.kind, tower.body.x, tower.body.y);
     const baseDmg = tower.damage * tower.level;
     const dmgBonus = boost ? Math.round(baseDmg * (boost.dmg - 1)) : 0;
     const msBonus = boost
@@ -7454,12 +7498,6 @@ class GameScene extends BaseScene {
 
   private updateTowers(delta: number) {
     const now = this.time.now;
-    const boosts: Record<TowerKind, AuraBoost> = {
-      basic: this.auraFor('basic'),
-      rapid: this.auraFor('rapid'),
-      sniper: this.auraFor('sniper'),
-    };
-
     for (const tower of this.towers) {
       if (tower.hp < tower.maxHp && now - tower.hitAt > 4000) {
         tower.hp = Math.min(tower.maxHp, tower.hp + tower.maxHp * 0.02 * delta / 1000);
@@ -7491,7 +7529,7 @@ class GameScene extends BaseScene {
 
       if (!target) continue;
 
-      const boost = boosts[tower.kind];
+      const boost = this.auraFor(tower.kind, tower.body.x, tower.body.y);
       let rate = tower.fireRate / (boost ? boost.spd : 1);
 
       // Balista nível 5: modo metralhadora
@@ -8136,7 +8174,7 @@ class GameScene extends BaseScene {
           .join(' e ');
 
       this.showMessage(
-        `AURA é passiva e já está ativa (Nv.${this.skillLevels.aura}) em: ${names}.`,
+        `AURA é passiva (Nv.${this.skillLevels.aura}): reforça ${names} que estiverem perto do herói (anel dourado). Fique perto das torres!`,
       );
       return;
     }
@@ -8745,7 +8783,7 @@ class GameScene extends BaseScene {
     const shield = this.shieldUntil > this.time.now;
 
     this.drawBar(
-      g, 130, 46, 188, 16,
+      g, 172, 46, 148, 16,
       this.baseHP / this.maxBaseHP,
       shield ? 0x86d8ff : 0xe2574c,
       shield ? 0x1f5f8f : 0x7a1d18,
@@ -8770,9 +8808,10 @@ class GameScene extends BaseScene {
     const shield = this.shieldUntil > now;
 
     this.coinText.setText(this.finalChoice === 'tech' ? '∞' : `${this.coins}`);
+    this.diaText.setText(`${this.diamonds}`);
 
     this.baseText.setText(
-      `${shield ? 'ESCUDO ' : 'FORTALEZA '}${this.baseHP} / ${this.maxBaseHP}`,
+      `${shield ? 'ESCUDO ' : 'FORTALEZA '}${this.baseHP}/${this.maxBaseHP}`,
     );
 
     const worldLabel = this.finalChoice === 'real'
@@ -9053,11 +9092,21 @@ class GameScene extends BaseScene {
   // (Guardião→Guardiã, Patrulheiro→Balista, Arcanista→Arcana). O herói
   // fundido reforça todas, com bônus x1,5. Funciona desde o início e melhora
   // a cada nível de AURA (compartilhado entre os heróis).
-  private auraFor(kind: TowerKind): AuraBoost {
-    const mine = this.fused
-      || this.presentHeroes().some(h => HERO_STATS[h].specialty === kind);
+  private auraFor(kind: TowerKind, x: number, y: number): AuraBoost {
+    // Só vale perto de um herói do tipo certo (ou do herói fundido).
+    const src: Array<{ x: number; y: number }> = [];
 
-    if (!mine) return null;
+    if (this.fused || HERO_STATS[this.heroKind].specialty === kind) {
+      src.push({ x: this.hero.x, y: this.hero.y });
+    }
+
+    for (const c of this.companions) {
+      if (HERO_STATS[c.kind].specialty === kind) src.push({ x: c.x, y: c.y });
+    }
+
+    const near = src.some(p => Phaser.Math.Distance.Between(p.x, p.y, x, y) <= AURA_RANGE);
+
+    if (!near) return null;
 
     const rank = this.skillLevels.aura;
     const mult = this.fused ? 1.5 : 1;
@@ -9076,14 +9125,18 @@ class GameScene extends BaseScene {
     if (!this.towers.length) return;
 
     const pulse = 0.55 + 0.25 * Math.sin(this.time.now / 300);
-    const boosts: Record<TowerKind, AuraBoost> = {
-      basic: this.auraFor('basic'),
-      rapid: this.auraFor('rapid'),
-      sniper: this.auraFor('sniper'),
-    };
+    // Anel discreto mostrando o alcance da aura de cada herói.
+    const pulse2 = 0.1 + 0.05 * Math.sin(this.time.now / 400);
+    const rings: Array<{ x: number; y: number }> = [{ x: this.hero.x, y: this.hero.y }];
+    for (const c of this.companions) rings.push({ x: c.x, y: c.y });
+
+    for (const r of rings) {
+      g.lineStyle(2, GOLD_LIGHT, pulse2 + 0.05);
+      g.strokeCircle(r.x, r.y, AURA_RANGE);
+    }
 
     for (const t of this.towers) {
-      if (!boosts[t.kind]) continue;
+      if (!this.auraFor(t.kind, t.body.x, t.body.y)) continue;
 
       g.fillStyle(GOLD_LIGHT, 0.12);
       g.fillEllipse(t.body.x, t.body.y + 14, 58, 24);
@@ -11013,6 +11066,7 @@ class GameScene extends BaseScene {
 
   private saveDia() {
     saveDiamonds({ diamonds: this.diamonds, lv6: this.lv6, ult: this.ultUnlocked });
+    if (this.diaText?.active) this.diaText.setText(`${this.diamonds}`);
   }
 
   // Nível 6: gasta diamantes direto (sem abrir a loja) ou avisa que não há.
@@ -12069,6 +12123,15 @@ class IntroScene extends BaseScene {
 
   create() {
     this.cameras.main.setBackgroundColor('#000000');
+
+    // O som toca assim que o navegador permitir (no primeiro toque na tela).
+    SFX.unlock();
+    SFX.ambient('intro');
+
+    this.run();
+  }
+
+  private run() {
     this.cameras.main.fadeIn(250, 0, 0, 0);
 
     this.input.keyboard?.once('keydown-ENTER', () => this.go());
@@ -12979,6 +13042,7 @@ const HERO_INTRO: Record<HeroKind, string> = {
 class ShopScene extends BaseScene {
   private selectedHero: HeroKind = 'guardiao';
   private objs: Phaser.GameObjects.GameObject[] = [];
+  private lifeHeroes: Array<{ v: Phaser.GameObjects.Container; kind: HeroKind }> = [];
 
   constructor() {
     super('ShopScene');
@@ -12987,7 +13051,20 @@ class ShopScene extends BaseScene {
   init() {
     this.selectedHero = 'guardiao';
     this.objs = [];
+    this.lifeHeroes = [];
     this.gameOver = false;
+  }
+
+  update() {
+    for (const h of this.lifeHeroes) this.lifeTick(h.v, h.kind, false, true);
+  }
+
+  private heroSpeak(v: Phaser.GameObjects.Container, kind: HeroKind) {
+    const lines = HERO_LINES[kind].select;
+
+    this.speak(v, lines[Math.floor(Math.random() * lines.length)], kind, true);
+    this.doPose(v, kind, false);
+    v.setData('nextIdle', this.time.now + 5000);
   }
 
   create() {
@@ -13019,6 +13096,7 @@ class ShopScene extends BaseScene {
   private render() {
     this.objs.forEach(o => this.killVisual(o));
     this.objs = [];
+    this.lifeHeroes = [];
 
     const keep = <T extends Phaser.GameObjects.GameObject>(o: T): T => {
       this.objs.push(o);
@@ -13074,6 +13152,18 @@ class ShopScene extends BaseScene {
         delay: i * 380,
       });
     });
+
+    // Mesma dinâmica da abertura: rosto bravo, pisca, faz poses; ao tocar, fala e posa.
+    hero.setData('baseEmo', 'angry');
+    this.setFace(hero, 'angry');
+    this.lifeHeroes.push({ v: hero, kind: this.selectedHero });
+
+    hero.setInteractive(
+      new Phaser.Geom.Rectangle(-22, -42, 44, 70),
+      Phaser.Geom.Rectangle.Contains,
+    );
+    hero.input!.cursor = 'pointer';
+    hero.on('pointerdown', () => this.heroSpeak(hero, this.selectedHero));
 
     keep(
       this.add.text(300, 92, st.name, {
@@ -13168,9 +13258,13 @@ class ShopScene extends BaseScene {
         card.strokeRect(x + 2, y + 2, 184, 126);
       }
 
-      keep(
+      const mini = keep(
         this.createHeroVisual(h, x + 94, y + 56).setScale(2).setDepth(4),
       );
+
+      mini.setData('baseEmo', on ? 'angry' : 'neutral');
+      this.setFace(mini, on ? 'angry' : 'neutral');
+      this.lifeHeroes.push({ v: mini, kind: h });
 
       keep(
         this.add.text(x + 94, y + 106, HERO_STATS[h].name, {
@@ -13191,6 +13285,9 @@ class ShopScene extends BaseScene {
 
         this.selectedHero = h;
         this.render();
+
+        const big = this.lifeHeroes[0];
+        if (big) this.heroSpeak(big.v, big.kind);
       });
     });
 
