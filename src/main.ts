@@ -415,10 +415,10 @@ const SUPREME_DAMAGE = 99999;
 const WORLD_INFO: Record<number, { name: string; short: string; cost: number }> = {
   1: { name: 'MUNDO 1 · PRIMITIVO', short: 'M1', cost: 0 },
   2: { name: 'MUNDO 2 · GRÉCIA ANTIGA', short: 'M2', cost: 20000 },
-  3: { name: 'MUNDO 3 · TECNOLÓGICO', short: 'M3', cost: 30000 },
+  3: { name: 'MUNDO 3 · TECNOLÓGICO', short: 'M3', cost: 150000 },
 };
 
-const REAL_WORLD_COST = 60000;
+const SUPREME_WORLD_COST = 300000;
 
 // Cenário nos céus (escolha do Mundo Tecnológico no nível 90).
 const SKY_COLORS = {
@@ -4115,27 +4115,17 @@ class GameScene extends BaseScene {
       this.contextObjects.push(description);
     });
 
-    if (this.companions.length) {
-      this.companions.forEach((c, i) => {
-        this.addContextButton(
-          188 + i * 200, 966,
-          `TROCAR: ${HERO_STATS[c.kind].name}`, '#355a52',
-          () => this.swapHero(c.kind), 190, 17,
-        );
-      });
-    } else {
-      const note = this.add.text(
-        188, 971,
-        '* A melhoria consome 1 ponto de habilidade obtido ao subir de nível.',
-        {
-          fontFamily: 'Arial, sans-serif',
-          fontSize: '8px',
-          color: '#d6c59b',
-        },
-      ).setDepth(33);
+    const note = this.add.text(
+      188, 971,
+      '* A melhoria consome 1 ponto de habilidade obtido ao subir de nível.',
+      {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '8px',
+        color: '#d6c59b',
+      },
+    ).setDepth(33);
 
-      this.contextObjects.push(note);
-    }
+    this.contextObjects.push(note);
   }
 
   // Os pontos de habilidade são compartilhados por todos os heróis:
@@ -4733,7 +4723,7 @@ class GameScene extends BaseScene {
       * (strong && tier === 'normal' ? 1.6 : 1)
       * type.hp * hpTier;
 
-    if (this.finalChoice === 'real') hp *= 1.35;
+    if (this.finalChoice === 'real') hp *= 2;
     hp = Math.max(
       2,
       Math.round(hp * (this.finalChoice === 'tech' ? 1 : ENEMY_HP_MULT)),
@@ -6789,13 +6779,6 @@ class GameScene extends BaseScene {
   private makeCompanionVisual(kind: HeroKind, x: number, y: number) {
     const v = this.createHeroVisual(kind, x, y, this.equip[kind]).setDepth(7);
 
-    v.setSize(46, 62);
-    v.setInteractive({ useHandCursor: true });
-    v.on('pointerdown', () => {
-      if (this.gameOver || this.modalOpen) return;
-      this.swapHero(kind);
-    });
-
     return v;
   }
 
@@ -6942,61 +6925,6 @@ class GameScene extends BaseScene {
         );
       }
     }
-  }
-
-  // Troca o herói ativo por um companheiro (sem tempo de espera).
-  private swapHero(kind: HeroKind) {
-    const comp = this.companions.find(c => c.kind === kind);
-
-    if (!comp || this.fused || kind === this.heroKind) return;
-
-    if (this.heroDead) {
-      this.showMessage('Reviva o herói antes de trocar.');
-      return;
-    }
-
-    const old = this.heroKind;
-    const hx = this.hero.x;
-    const hy = this.hero.y;
-
-    // Os dois trocam de lugar.
-    this.hero.setPosition(comp.x, comp.y);
-    comp.x = hx;
-    comp.y = hy;
-
-    this.killVisual(this.heroVisual);
-    this.heroKind = kind;
-    this.heroVisual = this.buildActiveVisual(this.hero.x, this.hero.y);
-    this.heroLegs = this.heroVisual.getData('legs') as Phaser.GameObjects.Rectangle[];
-
-    this.killVisual(comp.visual);
-    comp.kind = old;
-    comp.visual = this.makeCompanionVisual(old, comp.x, comp.y);
-    comp.legs = comp.visual.getData('legs') as Phaser.GameObjects.Rectangle[];
-    comp.label.setText(HERO_STATS[old].name).setPosition(comp.x, comp.y - 42);
-    this.restyleAllies();
-
-    this.applyHeroStats();
-    this.heroLabel
-      .setText(`${this.heroTitle()} · Nv. ${this.heroLevel}`)
-      .setPosition(this.hero.x, this.hero.y - 42);
-
-    const ring = this.add.circle(this.hero.x, this.hero.y, 18, 0xfff0a0, 0.3)
-      .setStrokeStyle(3, GOLD_LIGHT, 0.9)
-      .setBlendMode(Phaser.BlendModes.ADD)
-      .setDepth(13);
-
-    this.tweens.add({
-      targets: ring,
-      scale: 4,
-      alpha: 0,
-      duration: 500,
-      onComplete: () => ring.destroy(),
-    });
-
-    this.closeContextMenu();
-    this.showMessage(`${HERO_STATS[kind].name} assumiu o comando. Nível e habilidades mantidos.`);
-    this.refreshInterface();
   }
 
   // ---------- fusão (Mundo Real) ----------
@@ -7160,7 +7088,7 @@ class GameScene extends BaseScene {
       `Para avançar além da onda ${level === 2 ? 29 : 59} é preciso desbloquear este mundo.\n\n` +
       `Custo: ${info.cost} moedas  (você tem ${this.coins})\n` +
       `Recompensa: ${heroName} entra na batalha ao seu lado (heróis em campo ao mesmo tempo).\n` +
-      'Toque no companheiro (ou use TROCAR) para assumir o comando; nível e habilidades se mantêm.';
+      'Ele luta sozinho, ao seu lado, usando as próprias habilidades de ataque.';
 
     this.openModal(info.name, body, [
       {
@@ -7227,27 +7155,23 @@ class GameScene extends BaseScene {
 
   private openFinalChoice() {
     const body =
-      `Qual mundo você escolhe?\n\nVocê tem ${this.coins} moedas.`;
+      `Deseja ascender ao mundo supremo?\n\nVocê tem ${this.coins} moedas.`;
 
-    this.openModal('A ESCOLHA FINAL', body, [
+    this.openModal('O MUNDO SUPREMO', body, [
       {
-        label: 'MUNDO TECNOLÓGICO',
+        label: `ASCENDER · ${SUPREME_WORLD_COST}`,
         color: '#2d6a8a',
-        action: () => this.chooseFinal('tech'),
-      },
-      {
-        label: `MUNDO REAL · ${REAL_WORLD_COST}`,
-        color: '#6a4a3a',
         action: () => {
-          if (this.coins < REAL_WORLD_COST) {
-            this.modalBody?.setText(body + '\n\nMOEDAS INSUFICIENTES PARA ESTE MUNDO!').setColor('#ff9a8a');
+          if (this.coins < SUPREME_WORLD_COST) {
+            this.modalBody?.setText(body + '\n\nMOEDAS INSUFICIENTES!').setColor('#ff9a8a');
             return;
           }
 
-          this.coins -= REAL_WORLD_COST;
-          this.chooseFinal('real');
+          // O histórico guardado é o de antes do pagamento.
+          this.chooseFinal('tech');
         },
       },
+      { label: 'AGORA NÃO', color: '#3a4046', action: () => this.closeModal() },
     ]);
   }
 
@@ -7803,21 +7727,12 @@ class GameScene extends BaseScene {
     close.setDepth(53);
     keep(close);
 
-    // troca de herói
     if (this.companions.length) {
-      this.companions.forEach((c, i) => {
-        const b = this.makeButton(
-          40 + i * 265, 764, `TROCAR: ${HERO_STATS[c.kind].name}`, '#355a52',
-          () => {
-            this.closeModal();
-            this.swapHero(c.kind);
-          },
-          12, 255, 36,
-        );
-
-        b.setDepth(53);
-        keep(b);
-      });
+      label(
+        40, 772,
+        `Heróis em campo: ${this.presentHeroes().map(h => HERO_STATS[h].name).join(', ')}.`,
+        12, '#cfe8d8',
+      );
     } else if (this.fused) {
       label(40, 776, 'Os três heróis estão fundidos em um só.', 11, '#f0d58a');
     } else {
