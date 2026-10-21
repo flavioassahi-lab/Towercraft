@@ -75,7 +75,7 @@ const TOWER_STATS: Record<TowerKind, {
     description: 'Ataque equilibrado',
   },
   rapid: {
-    name: 'BESTEIRA',
+    name: 'BALISTA',
     range: 100,
     damage: 1,
     fireRate: 250,
@@ -177,6 +177,542 @@ type Tier = 'normal' | 'elite' | 'boss';
 type AllyKind = 'dog' | 'human' | 'drone';
 type SpawnSpec = { kind: EnemyKind; tier: Tier; route?: 'left' | 'right' };
 
+// ==================================================
+// SOM (sintetizado no navegador, sem arquivos)
+// ==================================================
+
+type Ambience = 'title' | 'primitive' | 'greece' | 'tech' | 'real' | 'sky';
+
+type SfxName =
+  | 'click' | 'slash' | 'arrow' | 'orb' | 'fusedorb'
+  | 't_basic' | 't_rapid' | 't_sniper'
+  | 'kill' | 'hurt' | 'levelup' | 'wave' | 'net' | 'build' | 'upgrade'
+  | 'coin' | 'explosion' | 'repair' | 'ult' | 'clones' | 'lightning'
+  | 'death' | 'revive' | 'victory' | 'defeat' | 'boss';
+
+type Emotion = 'neutral' | 'happy' | 'angry' | 'hurt' | 'surprised' | 'sad';
+
+const HERO_LINES: Record<HeroKind, {
+  pitch: number;
+  rate: number;
+  select: string[];
+  level: string;
+  death: string;
+  revive: string;
+  skill: Record<string, string>;
+}> = {
+  guardiao: {
+    pitch: 0.55,
+    rate: 0.9,
+    select: ['Pela fortaleza!', 'Nenhum passará!', 'Meu escudo é a muralha!'],
+    level: 'Mais forte!',
+    death: 'Argh!',
+    revive: 'Ainda de pé!',
+    skill: {
+      explosion: 'Impacto!', repair: 'Reforçar!', strike: 'Golpe final!',
+      clones: 'Irmãos de armas!', lightning: 'Trovão!',
+    },
+  },
+  patrulheiro: {
+    pitch: 1.05,
+    rate: 1.15,
+    select: ['Alvo na mira!', 'Olhos abertos.', 'Pronto para a caçada!'],
+    level: 'Mira afiada!',
+    death: 'Ugh!',
+    revive: 'De volta ao jogo!',
+    skill: {
+      explosion: 'Fogo!', repair: 'Consertando!', strike: 'Chuva de flechas!',
+      clones: 'Sombras!', lightning: 'Raio!',
+    },
+  },
+  arcanista: {
+    pitch: 1.5,
+    rate: 1.0,
+    select: ['A magia me guia.', 'Sinto o poder!', 'Os astros respondem.'],
+    level: 'Meu poder cresce!',
+    death: 'Ahh!',
+    revive: 'A magia me trouxe de volta!',
+    skill: {
+      explosion: 'Explosão arcana!', repair: 'Restaurar!', strike: 'Meteoro!',
+      clones: 'Ilusões!', lightning: 'Relâmpago!',
+    },
+  },
+};
+
+const SFX = (() => {
+  const KEY = 'towercraft_sound_v1';
+  const prefs = { music: true, sfx: true, voice: true };
+
+  try {
+    const raw = window.localStorage.getItem(KEY);
+    if (raw) Object.assign(prefs, JSON.parse(raw) as Partial<typeof prefs>);
+  } catch {
+    // sem armazenamento: usa o padrão
+  }
+
+  let ctx: AudioContext | null = null;
+  let sfxGain: GainNode | null = null;
+  let musicGain: GainNode | null = null;
+  let noiseBuf: AudioBuffer | null = null;
+  let wanted: Ambience = 'title';
+  let current: Ambience | null = null;
+  let timer: number | null = null;
+  let beat = 0;
+  let stopNodes: Array<() => void> = [];
+  let lastVoice = 0;
+  const last: Record<string, number> = {};
+
+  const init = (): AudioContext | null => {
+    if (ctx) return ctx;
+
+    try {
+      const AC = window.AudioContext
+        || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+
+      if (!AC) return null;
+
+      const c = new AC();
+      const sg = c.createGain();
+      const mg = c.createGain();
+
+      sg.gain.value = 0.5;
+      mg.gain.value = 0.16;
+      sg.connect(c.destination);
+      mg.connect(c.destination);
+
+      const buf = c.createBuffer(1, c.sampleRate * 2, c.sampleRate);
+      const d = buf.getChannelData(0);
+
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+
+      ctx = c;
+      sfxGain = sg;
+      musicGain = mg;
+      noiseBuf = buf;
+    } catch {
+      ctx = null;
+    }
+
+    return ctx;
+  };
+
+  type ToneOpts = { to?: number; delay?: number; dest?: AudioNode; attack?: number };
+
+  const tone = (
+    f: number, dur: number, type: OscillatorType, vol: number, o: ToneOpts = {},
+  ) => {
+    if (!ctx || !sfxGain) return;
+
+    const t = ctx.currentTime + (o.delay ?? 0);
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+
+    osc.type = type;
+    osc.frequency.setValueAtTime(f, t);
+    if (o.to) osc.frequency.exponentialRampToValueAtTime(o.to, t + dur);
+
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), t + (o.attack ?? 0.008));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+    osc.connect(g);
+    g.connect(o.dest ?? sfxGain);
+    osc.start(t);
+    osc.stop(t + dur + 0.05);
+  };
+
+  const noise = (
+    dur: number, vol: number, freq: number, filter: BiquadFilterType,
+    o: { to?: number; delay?: number; q?: number } = {},
+  ) => {
+    if (!ctx || !sfxGain || !noiseBuf) return;
+
+    const t = ctx.currentTime + (o.delay ?? 0);
+    const src = ctx.createBufferSource();
+    const fl = ctx.createBiquadFilter();
+    const g = ctx.createGain();
+
+    src.buffer = noiseBuf;
+    fl.type = filter;
+    fl.frequency.setValueAtTime(freq, t);
+    if (o.to) fl.frequency.exponentialRampToValueAtTime(o.to, t + dur);
+    fl.Q.value = o.q ?? 1;
+
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+    src.connect(fl);
+    fl.connect(g);
+    g.connect(sfxGain);
+    src.start(t);
+    src.stop(t + dur + 0.05);
+  };
+
+  const MIN_GAP: Record<string, number> = {
+    slash: 70, arrow: 70, orb: 70, fusedorb: 70,
+    t_basic: 90, t_rapid: 70, t_sniper: 100,
+    kill: 45, hurt: 350, coin: 60, click: 40,
+  };
+
+  const play = (name: SfxName) => {
+    if (!prefs.sfx || !ctx || ctx.state !== 'running') return;
+
+    const now = performance.now();
+
+    if (now - (last[name] ?? 0) < (MIN_GAP[name] ?? 40)) return;
+    last[name] = now;
+
+    switch (name) {
+      case 'click':
+        tone(660, 0.06, 'square', 0.12, { to: 440 });
+        break;
+      case 'slash':
+        noise(0.14, 0.5, 3000, 'bandpass', { to: 700, q: 0.8 });
+        tone(300, 0.08, 'sawtooth', 0.12, { to: 120 });
+        break;
+      case 'arrow':
+        tone(1200, 0.09, 'triangle', 0.25, { to: 500 });
+        noise(0.05, 0.15, 5000, 'highpass');
+        break;
+      case 'orb':
+        tone(440, 0.18, 'sine', 0.3, { to: 880 });
+        tone(660, 0.18, 'triangle', 0.12, { to: 1320, delay: 0.02 });
+        break;
+      case 'fusedorb':
+        tone(520, 0.22, 'sine', 0.3, { to: 1040 });
+        tone(780, 0.22, 'sine', 0.2, { to: 1560 });
+        break;
+      case 't_basic':
+        noise(0.18, 0.3, 900, 'lowpass', { to: 200 });
+        tone(160, 0.14, 'sawtooth', 0.12, { to: 70 });
+        break;
+      case 't_rapid':
+        tone(900, 0.04, 'square', 0.07, { to: 600 });
+        break;
+      case 't_sniper':
+        tone(500, 0.2, 'sine', 0.18, { to: 1500 });
+        tone(1000, 0.2, 'triangle', 0.08, { to: 2000 });
+        break;
+      case 'kill':
+        noise(0.06, 0.2, 2000, 'bandpass');
+        tone(500, 0.08, 'square', 0.08, { to: 200 });
+        break;
+      case 'hurt':
+        tone(220, 0.18, 'sawtooth', 0.25, { to: 90 });
+        break;
+      case 'levelup':
+        [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.22, 'triangle', 0.25, { delay: i * 0.08 }));
+        break;
+      case 'wave':
+        tone(196, 0.5, 'sawtooth', 0.16, { to: 220 });
+        tone(294, 0.55, 'sawtooth', 0.12, { delay: 0.25, to: 330 });
+        break;
+      case 'net':
+        noise(0.3, 0.3, 2500, 'highpass', { to: 600 });
+        tone(300, 0.3, 'sine', 0.15, { to: 150 });
+        break;
+      case 'build':
+        tone(180, 0.1, 'square', 0.18, { to: 120 });
+        noise(0.1, 0.3, 600, 'lowpass');
+        break;
+      case 'upgrade':
+        tone(523, 0.1, 'triangle', 0.25);
+        tone(784, 0.15, 'triangle', 0.25, { delay: 0.09 });
+        break;
+      case 'coin':
+        tone(1320, 0.08, 'square', 0.1);
+        tone(1760, 0.12, 'square', 0.1, { delay: 0.07 });
+        break;
+      case 'explosion':
+        noise(0.6, 0.7, 1200, 'lowpass', { to: 80 });
+        tone(90, 0.5, 'sine', 0.5, { to: 30 });
+        break;
+      case 'repair':
+        [440, 554, 659].forEach((f, i) => tone(f, 0.2, 'sine', 0.25, { delay: i * 0.12 }));
+        break;
+      case 'ult':
+        tone(200, 0.5, 'sawtooth', 0.22, { to: 900 });
+        noise(0.7, 0.5, 3000, 'bandpass', { to: 200 });
+        tone(70, 0.7, 'sine', 0.5, { to: 30, delay: 0.3 });
+        break;
+      case 'clones':
+        tone(700, 0.12, 'sine', 0.2, { to: 1400 });
+        tone(900, 0.12, 'sine', 0.2, { to: 1800, delay: 0.09 });
+        break;
+      case 'lightning':
+        noise(0.25, 0.6, 6000, 'highpass', { to: 1000 });
+        tone(1800, 0.12, 'sawtooth', 0.18, { to: 100 });
+        break;
+      case 'death':
+        tone(300, 0.7, 'sawtooth', 0.3, { to: 50 });
+        break;
+      case 'revive':
+        [392, 523, 659, 784].forEach((f, i) => tone(f, 0.25, 'sine', 0.25, { delay: i * 0.1 }));
+        break;
+      case 'victory':
+        [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(f, 0.3, 'triangle', 0.28, { delay: i * 0.16 }));
+        break;
+      case 'boss':
+        tone(70, 1.2, 'sawtooth', 0.4, { to: 38 });
+        tone(105, 1.0, 'square', 0.18, { to: 55, delay: 0.1 });
+        noise(1.0, 0.5, 500, 'lowpass', { to: 90 });
+        tone(60, 0.8, 'sine', 0.6, { to: 30, delay: 2.0 });
+        break;
+      case 'defeat':
+        [330, 294, 262, 196].forEach((f, i) => tone(f, 0.5, 'sawtooth', 0.2, { delay: i * 0.3 }));
+        break;
+      default:
+        break;
+    }
+  };
+
+  const say = (text: string, pitch: number, rate: number) => {
+    if (!prefs.voice) return;
+
+    try {
+      if (typeof window.speechSynthesis === 'undefined') return;
+
+      const now = performance.now();
+
+      if (now - lastVoice < 1200) return;
+      lastVoice = now;
+
+      window.speechSynthesis.cancel();
+
+      const u = new SpeechSynthesisUtterance(text);
+
+      u.lang = 'pt-BR';
+      u.pitch = pitch;
+      u.rate = rate;
+      u.volume = 0.9;
+      window.speechSynthesis.speak(u);
+    } catch {
+      // sem voz neste navegador
+    }
+  };
+
+  // ---------- trilha ambiente por mundo ----------
+  const stopAmbient = () => {
+    if (timer !== null) {
+      window.clearInterval(timer);
+      timer = null;
+    }
+
+    for (const f of stopNodes) f();
+
+    stopNodes = [];
+    current = null;
+  };
+
+  const fadeOut = (g: GainNode, stop: () => void) => {
+    stopNodes.push(() => {
+      if (!ctx) return;
+
+      try {
+        const t = ctx.currentTime;
+
+        g.gain.cancelScheduledValues(t);
+        g.gain.setValueAtTime(g.gain.value, t);
+        g.gain.linearRampToValueAtTime(0.0001, t + 0.6);
+        window.setTimeout(stop, 800);
+      } catch {
+        stop();
+      }
+    });
+  };
+
+  const drone = (freq: number, type: OscillatorType, vol: number, cutoff: number) => {
+    if (!ctx || !musicGain) return;
+
+    const o = ctx.createOscillator();
+    const fl = ctx.createBiquadFilter();
+    const g = ctx.createGain();
+    const t = ctx.currentTime;
+
+    o.type = type;
+    o.frequency.value = freq;
+    fl.type = 'lowpass';
+    fl.frequency.value = cutoff;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 2);
+
+    o.connect(fl);
+    fl.connect(g);
+    g.connect(musicGain);
+    o.start();
+
+    fadeOut(g, () => {
+      try { o.stop(); } catch { /* já parado */ }
+    });
+  };
+
+  const bed = (freq: number, q: number, vol: number) => {
+    if (!ctx || !musicGain || !noiseBuf) return;
+
+    const src = ctx.createBufferSource();
+    const fl = ctx.createBiquadFilter();
+    const g = ctx.createGain();
+    const t = ctx.currentTime;
+
+    src.buffer = noiseBuf;
+    src.loop = true;
+    fl.type = 'bandpass';
+    fl.frequency.value = freq;
+    fl.Q.value = q;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 2);
+
+    src.connect(fl);
+    fl.connect(g);
+    g.connect(musicGain);
+    src.start();
+
+    fadeOut(g, () => {
+      try { src.stop(); } catch { /* já parado */ }
+    });
+  };
+
+  const pick = <T,>(a: T[]): T => a[Math.floor(Math.random() * a.length)];
+
+  const startAmbient = (theme: Ambience) => {
+    if (!musicGain) return;
+
+    const dest = musicGain;
+    const m = (f: number, d: number, type: OscillatorType, v: number, o: ToneOpts = {}) =>
+      tone(f, d, type, v, { ...o, dest });
+
+    let tempo = 1600;
+    let stepFn: (i: number) => void = () => undefined;
+
+    switch (theme) {
+      case 'primitive': {
+        drone(55, 'sawtooth', 0.14, 150);
+        bed(500, 0.6, 0.22);
+        tempo = 500;
+        stepFn = i => {
+          if (i % 4 === 0) m(90, 0.25, 'sine', 0.8, { to: 45 });
+          if (i % 8 === 6) m(130, 0.18, 'sine', 0.5, { to: 70 });
+          if (i % 16 === 3) m(pick([330, 392, 440, 523, 587]), 1.0, 'triangle', 0.3, { attack: 0.08 });
+        };
+        break;
+      }
+      case 'greece': {
+        drone(98, 'triangle', 0.22, 500);
+        drone(147, 'triangle', 0.12, 500);
+        tempo = 420;
+        stepFn = () => {
+          if (Math.random() < 0.7) {
+            const f = pick([293, 329, 349, 392, 440, 493, 523, 587]);
+
+            m(f, 0.9, 'triangle', 0.4, { attack: 0.004 });
+            m(f * 2, 0.5, 'sine', 0.1, { attack: 0.004 });
+          }
+        };
+        break;
+      }
+      case 'tech': {
+        drone(55, 'square', 0.1, 300);
+        tempo = 190;
+        stepFn = i => {
+          const bass = [55, 55, 82, 55, 65, 55, 98, 82];
+
+          m(bass[i % 8], 0.16, 'sawtooth', 0.4);
+          if (i % 2 === 1) m(pick([440, 523, 659, 784]), 0.09, 'square', 0.1);
+        };
+        break;
+      }
+      case 'real': {
+        drone(65, 'sawtooth', 0.12, 220);
+        drone(98, 'sawtooth', 0.07, 200);
+        bed(300, 0.7, 0.1);
+        tempo = 2200;
+        stepFn = () => {
+          const f = pick([196, 233, 174]);
+
+          m(f * 2, 2.5, 'sine', 0.3);
+          m(f * 3.01, 2.0, 'sine', 0.1);
+        };
+        break;
+      }
+      case 'sky': {
+        drone(131, 'sine', 0.3, 900);
+        drone(196, 'sine', 0.2, 900);
+        drone(330, 'sine', 0.1, 1200);
+        tempo = 1400;
+        stepFn = () => m(pick([659, 784, 988, 1175, 1319]), 1.6, 'sine', 0.18, { attack: 0.2 });
+        break;
+      }
+      default: {
+        drone(110, 'sine', 0.4, 400);
+        drone(165, 'sine', 0.25, 500);
+        tempo = 1600;
+        stepFn = i => m([220, 262, 330, 392, 440, 392, 330, 262][i % 8], 1.8, 'sine', 0.25, { attack: 0.1 });
+        break;
+      }
+    }
+
+    beat = 0;
+    timer = window.setInterval(() => stepFn(beat++), tempo);
+  };
+
+  const ambient = (theme: Ambience) => {
+    wanted = theme;
+
+    if (!prefs.music || !ctx || ctx.state !== 'running') {
+      if (current) stopAmbient();
+      return;
+    }
+
+    if (current === theme) return;
+
+    stopAmbient();
+    current = theme;
+    startAmbient(theme);
+  };
+
+  const save = () => {
+    try {
+      window.localStorage.setItem(KEY, JSON.stringify(prefs));
+    } catch {
+      // ignora
+    }
+  };
+
+  const unlock = () => {
+    const c = init();
+
+    if (!c) return;
+
+    if (c.state === 'suspended') {
+      c.resume().then(() => ambient(wanted)).catch(() => undefined);
+    }
+  };
+
+  const setPref = (k: 'music' | 'sfx' | 'voice', v: boolean) => {
+    prefs[k] = v;
+    save();
+
+    if (k === 'music') {
+      if (v) ambient(wanted);
+      else stopAmbient();
+    }
+
+    if (k === 'voice' && !v) {
+      try { window.speechSynthesis.cancel(); } catch { /* ignora */ }
+    }
+  };
+
+  return { prefs, play, say, ambient, unlock, setPref };
+})();
+
+try {
+  window.addEventListener('pointerdown', () => SFX.unlock());
+  window.addEventListener('keydown', () => SFX.unlock());
+} catch {
+  // ambiente sem janela
+}
+
 const HERO_ORDER: HeroKind[] = ['guardiao', 'patrulheiro', 'arcanista'];
 
 const HERO_STATS: Record<HeroKind, {
@@ -205,7 +741,7 @@ const HERO_STATS: Record<HeroKind, {
     skill: 'explosion',
     gear: ['Espada', 'Armadura', 'Brasão'],
     damage: 3,
-    range: 100,
+    range: 62,
     attackRate: 650,
     speed: 205,
     blockRadius: 30,
@@ -231,7 +767,7 @@ const HERO_STATS: Record<HeroKind, {
     armor: 0x3d7a4a,
     cape: 0x2d4a2a,
     auraName: 'Aura do Patrulheiro',
-    auraDesc: 'Passiva: só as torres BESTEIRA ficam mais fortes.',
+    auraDesc: 'Passiva: só as torres BALISTA ficam mais fortes.',
   },
   arcanista: {
     name: 'ARCANISTA',
@@ -332,6 +868,63 @@ const PIX_PACKS = [
   { label: 'R$ 10,00', value: 10, coins: 1200 },
   { label: 'R$ 25,00', value: 25, coins: 3500 },
 ];
+
+// Diamantes: moeda que só vem do PIX.
+const DIAMOND_KEY = 'towercraft_diamonds_v1';
+
+const DIAMOND_COST = { tower: 15, pet: 15, ult: 20 };
+
+const DIAMOND_PACKS = [
+  { label: 'R$ 15,00', value: 15, diamonds: 15, desc: '1 torre nv.6 OU 1 pet' },
+  { label: 'R$ 20,00', value: 20, diamonds: 20, desc: 'Ultimate dos heróis' },
+  { label: 'R$ 30,00', value: 30, diamonds: 45, desc: '3 torres nv.6 OU 3 pets' },
+  { label: 'R$ 40,00', value: 40, diamonds: 65, desc: '3 torres/3 pets + ultimate' },
+  { label: 'R$ 60,00', value: 60, diamonds: 110, desc: '3 torres + 3 pets + ultimate' },
+];
+
+type DiamondSave = {
+  diamonds: number;
+  lv6: Record<'basic' | 'rapid' | 'sniper', boolean>;
+  ult: boolean;
+};
+
+function loadDiamonds(): DiamondSave {
+  const empty: DiamondSave = {
+    diamonds: 0,
+    lv6: { basic: false, rapid: false, sniper: false },
+    ult: false,
+  };
+
+  try {
+    const raw = localStorage.getItem(DIAMOND_KEY);
+
+    if (raw) {
+      const d = JSON.parse(raw);
+
+      return {
+        diamonds: Number(d.diamonds) || 0,
+        lv6: {
+          basic: !!(d.lv6 && d.lv6.basic),
+          rapid: !!(d.lv6 && d.lv6.rapid),
+          sniper: !!(d.lv6 && d.lv6.sniper),
+        },
+        ult: !!d.ult,
+      };
+    }
+  } catch {
+    // sem armazenamento: começa zerado
+  }
+
+  return empty;
+}
+
+function saveDiamonds(d: DiamondSave) {
+  try {
+    localStorage.setItem(DIAMOND_KEY, JSON.stringify(d));
+  } catch {
+    // ignora
+  }
+}
 
 function pixField(id: string, value: string): string {
   return id + String(value.length).padStart(2, '0') + value;
@@ -624,6 +1217,9 @@ type Enemy = {
   burnDps: number;
   stunUntil: number;
   tint: number;
+  flying: boolean;
+  immune: boolean;
+  netUntil: number;
 };
 
 type Blocker = {
@@ -652,6 +1248,7 @@ type Tower = {
   hitAt: number;
   streak: number;
   lastShotAt: number;
+  netAt: number;
 };
 
 type WaveState = {
@@ -904,6 +1501,8 @@ class BaseScene extends Phaser.Scene {
     c.on('pointerdown', () => {
       if (this.gameOver && !allowWhenOver) return;
       draw('down');
+      SFX.unlock();
+      SFX.play('click');
       action();
     });
 
@@ -1574,8 +2173,6 @@ class BaseScene extends Phaser.Scene {
         0, -33, -3, 6, 3, 6, 0, -6, 0xc83a32,
       );
 
-      const visor = this.add.rectangle(0, -19, 12, 3, 0x27363c);
-
       const sword = this.add.rectangle(15, -6, 4, 25, 0xe6ebe4)
         .setStrokeStyle(1, 0x65737b)
         .setRotation(-0.4);
@@ -1589,13 +2186,11 @@ class BaseScene extends Phaser.Scene {
 
       const mark = this.add.star(-14, -3, 4, 2, 5, GOLD_LIGHT);
 
-      c.add([helmet, crest, visor, sword, grip, shield, mark]);
+      c.add([helmet, crest, sword, grip, shield, mark]);
     } else if (kind === 'patrulheiro') {
       const hood = this.add.triangle(
         0, -25, -12, 7, 12, 7, 0, -12, 0x2d5a34,
       ).setStrokeStyle(2, 0x14261a);
-
-      const mask = this.add.rectangle(0, -17, 12, 4, 0x1b2a1d);
 
       const quiver = this.add.rectangle(-9, -6, 5, 18, 0x6a4a2a)
         .setStrokeStyle(1, 0x2a1c10)
@@ -1617,7 +2212,7 @@ class BaseScene extends Phaser.Scene {
 
       const arrow = this.add.rectangle(18, -4, 18, 2, 0xe0d8b8);
 
-      c.add([quiver, feather, hood, mask, bow, arrow]);
+      c.add([quiver, feather, hood, bow, arrow]);
     } else {
       const hat = this.add.triangle(
         0, -30, -12, 8, 12, 8, 0, -16, 0x4a2f7a,
@@ -1651,8 +2246,96 @@ class BaseScene extends Phaser.Scene {
 
     if (eq) this.addGearLook(c, kind, eq, torso);
 
+    // Rosto: olhos, sobrancelhas e boca que mudam com a emoção.
+    const face = this.add.graphics();
+
+    face.setPosition(0, -19);
+    c.add(face);
+    c.setData('face', face);
+    this.setFace(c, 'neutral');
+
     c.setData('legs', [leftBoot, rightBoot]);
     return c;
+  }
+
+  protected setFace(c: Phaser.GameObjects.Container, emo: Emotion) {
+    const g = c.getData('face') as Phaser.GameObjects.Graphics | undefined;
+
+    if (!g || !g.active) return;
+
+    g.clear();
+
+    const ink = 0x1a1410;
+    const ex = 3.4;
+    const ey = 1;
+
+    const eyes = (r: number, pr: number, dy = 0) => {
+      for (const sx of [-ex, ex]) {
+        g.fillStyle(0xffffff, 1);
+        g.fillCircle(sx, ey, r);
+        g.fillStyle(ink, 1);
+        g.fillCircle(sx, ey + dy, pr);
+      }
+    };
+
+    g.lineStyle(1.4, ink, 1);
+
+    if (emo === 'happy') {
+      for (const sx of [-ex, ex]) {
+        g.beginPath();
+        g.arc(sx, ey + 1, 2.1, Math.PI, 0, false);
+        g.strokePath();
+      }
+
+      g.beginPath();
+      g.arc(0, 3.4, 3.4, 0.15, Math.PI - 0.15, false);
+      g.strokePath();
+      g.fillStyle(0xff8a7a, 0.45);
+      g.fillCircle(-6, 4, 1.8);
+      g.fillCircle(6, 4, 1.8);
+    } else if (emo === 'angry') {
+      eyes(2.1, 1.2);
+      g.lineStyle(1.8, ink, 1);
+      g.lineBetween(-6.2, -3, -1.6, -0.6);
+      g.lineBetween(6.2, -3, 1.6, -0.6);
+      g.lineStyle(1.4, ink, 1);
+      g.fillStyle(0x3a0d0d, 1);
+      g.fillRoundedRect(-3, 4.2, 6, 3.2, 1.2);
+      g.fillStyle(0xffffff, 1);
+      g.fillRect(-2.4, 4.2, 4.8, 1.1);
+    } else if (emo === 'hurt') {
+      for (const sx of [-1, 1]) {
+        g.beginPath();
+        g.moveTo(sx * 5.6, ey - 2.4);
+        g.lineTo(sx * 2.4, ey);
+        g.lineTo(sx * 5.6, ey + 2.4);
+        g.strokePath();
+      }
+
+      g.fillStyle(0x3a0d0d, 1);
+      g.fillEllipse(0, 5.4, 4.2, 3.6);
+    } else if (emo === 'surprised') {
+      eyes(3, 1);
+      g.lineStyle(1.4, ink, 1);
+      g.lineBetween(-6, -3.4, -1.8, -3.9);
+      g.lineBetween(6, -3.4, 1.8, -3.9);
+      g.fillStyle(0x3a0d0d, 1);
+      g.fillEllipse(0, 5.6, 3.4, 4.4);
+    } else if (emo === 'sad') {
+      eyes(2.1, 1.1, 0.6);
+      g.lineBetween(-6.2, -1.8, -1.6, -3.6);
+      g.lineBetween(6.2, -1.8, 1.6, -3.6);
+      g.beginPath();
+      g.arc(0, 7, 2.8, Math.PI + 0.3, 2 * Math.PI - 0.3, false);
+      g.strokePath();
+      g.fillStyle(0x6ab8ff, 0.9);
+      g.fillCircle(-5, 4.4, 1.2);
+    } else {
+      eyes(2.1, 1.2);
+      g.beginPath();
+      g.arc(0, 3.6, 2.6, 0.3, Math.PI - 0.3, false);
+      g.strokePath();
+    }
   }
 }
 
@@ -1685,6 +2368,8 @@ class GameScene extends BaseScene {
 
   private buildMode = false;
   private pendingBuild: { x: number; y: number } | null = null;
+  private buildPos = { x: 300, y: 487 };
+  private buildDrag: { x: number; y: number } | null = null;
   private towerMenuOpen = false;
 
   private selectedTowerKind: TowerKind = 'basic';
@@ -1706,8 +2391,11 @@ class GameScene extends BaseScene {
   private stashTowers: Tower[] = [];
   private stashAllies: Ally[] = [];
   private transToken = 0;
-  private skipGateWave = 0;
+  private repeatGate = false;
   private gatePrompt = false;
+  private diamonds = 0;
+  private lv6: Record<TowerKind, boolean> = { basic: false, rapid: false, sniper: false };
+  private ultUnlocked = false;
   private selectorObjs: Phaser.GameObjects.GameObject[] = [];
   private selectorRects: { x: number; y: number; w: number; h: number; kind: HeroKind }[] = [];
   private frameCount = 0;
@@ -1769,14 +2457,12 @@ class GameScene extends BaseScene {
   protected contextPanel?: Phaser.GameObjects.Graphics;
   protected contextTitle?: Phaser.GameObjects.Text;
 
-  private joystickPointer: number | null = null;
-  private joystickX = 0;
-  private joystickY = 0;
-  private joystickCenter = { x: 86, y: 892 };
-
-  protected joystickBase!: Phaser.GameObjects.Arc;
-  private joystickKnob!: Phaser.GameObjects.Arc;
-  private joystickShine!: Phaser.GameObjects.Arc;
+  private heroSelected = false;
+  private menuOpen = false;
+  private menuObjs: Phaser.GameObjects.GameObject[] = [];
+  private startData: object | undefined;
+  private moveTarget: { x: number; y: number } | null = null;
+  private selectGfx!: Phaser.GameObjects.Graphics;
 
   constructor() {
     super('GameScene');
@@ -1788,6 +2474,10 @@ class GameScene extends BaseScene {
     extras?: { base: number; mana: number; skill: number };
     coins?: number;
   }) {
+    this.startData = data;
+    this.menuOpen = false;
+    this.menuObjs = [];
+
     const hk = data?.heroKind ?? 'guardiao';
     const ex = data?.extras ?? { base: 0, mana: 0, skill: 0 };
 
@@ -1799,7 +2489,7 @@ class GameScene extends BaseScene {
     this.companions = [];
     this.fused = false;
     this.techSnap = null;
-    this.skipGateWave = 0;
+    this.repeatGate = false;
     this.selectorObjs = [];
     this.selectorRects = [];
     this.stashTowers = [];
@@ -1825,6 +2515,12 @@ class GameScene extends BaseScene {
     this.selectedTower = null;
     this.selectedTowerKind = 'basic';
     this.nextRoute = 'left';
+
+    const saved = loadDiamonds();
+
+    this.diamonds = saved.diamonds;
+    this.lv6 = { ...saved.lv6 };
+    this.ultUnlocked = saved.ult;
 
     this.coins = data?.coins ?? 200;
     this.stock = data?.stock
@@ -1854,9 +2550,8 @@ class GameScene extends BaseScene {
     this.finalChoice = null;
     this.previewFor = -1;
 
-    this.joystickPointer = null;
-    this.joystickX = 0;
-    this.joystickY = 0;
+    this.heroSelected = false;
+    this.moveTarget = null;
 
     this.applyHeroStats();
     this.heroHp = this.heroMaxHp;
@@ -1871,6 +2566,7 @@ class GameScene extends BaseScene {
     this.healthLayer = this.add.graphics().setDepth(8);
     this.tracerLayer = this.add.graphics().setDepth(12);
     this.fxLayer = this.add.graphics().setDepth(9);
+    this.selectGfx = this.add.graphics().setDepth(5);
 
     this.cursors = this.input.keyboard!.createCursorKeys();
 
@@ -1891,14 +2587,17 @@ class GameScene extends BaseScene {
       );
 
       if (picked) {
-        // Escolhe o herói e já abre as habilidades dele.
+        // Escolhe o herói, seleciona e já abre as habilidades dele.
         if (picked.kind !== this.heroKind) this.swapHero(picked.kind);
 
+        this.moveTarget = null;
         this.openHeroMenu();
+        this.sayHero('select');
+        this.emote(this.heroVisual, 'happy', 1000);
         return;
       }
 
-      // Os controles da interface e o joystick não constroem torres.
+      // Os controles da interface não constroem torres.
       if (pointer.y < 150 || pointer.y >= 825) return;
 
       if (this.buildMode) {
@@ -1908,7 +2607,8 @@ class GameScene extends BaseScene {
           return;
         }
 
-        this.askBuild(pointer.x, pointer.y);
+        // Começa a arrastar: a sombra se move em relação ao dedo.
+        this.buildDrag = { x: pointer.x, y: pointer.y };
         return;
       }
 
@@ -1916,34 +2616,21 @@ class GameScene extends BaseScene {
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (this.buildMode && !this.pendingBuild && pointer.y >= 150 && pointer.y < 825) {
-        this.updateBuildPreview(pointer.x, pointer.y);
-      }
+      if (!this.buildMode || !this.buildDrag || !pointer.isDown) return;
 
-      if (this.joystickPointer === pointer.id && pointer.isDown) {
-        this.updateJoystick(pointer.x, pointer.y);
-      }
+      const dx = pointer.x - this.buildDrag.x;
+      const dy = pointer.y - this.buildDrag.y;
+
+      this.buildDrag = { x: pointer.x, y: pointer.y };
+      this.moveBuildGhost(dx, dy);
     });
 
-    this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
-      if (this.joystickPointer === pointer.id) {
-        this.joystickPointer = null;
-        this.joystickX = 0;
-        this.joystickY = 0;
-
-        this.moveKnob(this.joystickCenter.x, this.joystickCenter.y);
-      }
-    });
-
-    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (pointer.y > 825 && pointer.x < 170) {
-        this.joystickPointer = pointer.id;
-        this.updateJoystick(pointer.x, pointer.y);
-      }
+    this.input.on('pointerup', () => {
+      this.buildDrag = null;
     });
 
     this.showMessage(
-      'Bem-vindo, comandante! Construa torres e inicie a primeira onda.',
+      'Bem-vindo, comandante! Construa torres e inicie a primeira onda. Toque em MENU para som e reiniciar.',
     );
     this.refreshInterface();
   }
@@ -2000,7 +2687,7 @@ class GameScene extends BaseScene {
       v.setScale(1 + (t.level - 1) * 0.055);
 
       const lt = v.getData('levelText') as Phaser.GameObjects.Text | undefined;
-      if (lt) lt.setText(['I', 'II', 'III', 'IV', 'V'][t.level - 1]);
+      if (lt) lt.setText(['I', 'II', 'III', 'IV', 'V', 'VI'][t.level - 1]);
 
       if (t.level >= 5) {
         v.add(
@@ -3699,6 +4386,11 @@ class GameScene extends BaseScene {
       () => this.startWave(), 12, 188, 36,
     );
 
+    this.makeButton(
+      388, 5, 'MENU', '#3a4a5a',
+      () => this.openGameMenu(), 11, 74, 26,
+    ).setDepth(22);
+
     this.buildInfoText = this.add.text(12, 158, '', {
       fontFamily: 'Arial, sans-serif',
       fontSize: '11px',
@@ -3720,7 +4412,9 @@ class GameScene extends BaseScene {
 
     // ESC também encerra a construção.
     this.input.keyboard?.on('keydown-ESC', () => {
-      if (this.buildMode) this.exitBuild('Construção encerrada.');
+      if (this.menuOpen) this.closeGameMenu();
+      else if (this.buildMode) this.exitBuild('Construção encerrada.');
+      else this.openGameMenu();
     });
 
     // ---------- HUD INFERIOR ----------
@@ -3761,50 +4455,137 @@ class GameScene extends BaseScene {
     this.rangeGraphics = this.add.graphics().setDepth(4);
     this.buildPreview = this.add.graphics().setDepth(14).setVisible(false);
 
-    // Joystick ornamentado
-    const jc = this.joystickCenter;
-    const decor = this.add.graphics().setDepth(19);
+    // Placa do herói (no lugar do antigo joystick): dica de controle.
+    const plate = this.add.graphics().setDepth(19);
 
-    decor.lineStyle(2, GOLD_DARK, 1);
-    decor.strokeCircle(jc.x, jc.y, 57);
-    decor.lineStyle(1, GOLD, 0.8);
-    decor.strokeCircle(jc.x, jc.y, 54);
+    this.drawGem(plate, 22, 852, 4, GOLD_LIGHT);
+    this.drawGem(plate, 150, 852, 4, GOLD);
+    this.drawGem(plate, 22, 978, 4, GOLD);
+    this.drawGem(plate, 150, 978, 4, GOLD_LIGHT);
 
-    for (let a = 0; a < 360; a += 15) {
-      const rad = Phaser.Math.DegToRad(a);
-
-      decor.lineStyle(1, GOLD, 0.6);
-      decor.lineBetween(
-        jc.x + Math.cos(rad) * 51, jc.y + Math.sin(rad) * 51,
-        jc.x + Math.cos(rad) * 54, jc.y + Math.sin(rad) * 54,
-      );
-    }
-
-    this.drawGem(decor, jc.x, jc.y - 56, 4, GOLD_LIGHT);
-    this.drawGem(decor, jc.x, jc.y + 56, 4, GOLD);
-    this.drawGem(decor, jc.x - 56, jc.y, 4, GOLD);
-    this.drawGem(decor, jc.x + 56, jc.y, 4, GOLD);
-
-    this.joystickBase = this.add.circle(
-      jc.x, jc.y, 46, 0x0c0f12, 0.92,
-    ).setStrokeStyle(3, GOLD).setDepth(20);
-
-    this.joystickKnob = this.add.circle(
-      jc.x, jc.y, 22, 0x6f8f62, 0.98,
-    ).setStrokeStyle(3, GOLD_LIGHT).setDepth(21);
-
-    this.joystickShine = this.add.circle(
-      jc.x - 6, jc.y - 7, 8, 0xffffff, 0.3,
-    ).setDepth(22);
-
-    this.add.text(jc.x, 966, 'MOVER', {
+    this.add.text(86, 915, 'TOQUE NO HERÓI\nNO MAPA PARA\nSELECIONAR.\nDEPOIS TOQUE EM\nQUALQUER LUGAR\nPARA MOVER.', {
       fontFamily: 'Georgia, serif',
       fontSize: '11px',
       color: '#f0d58a',
       fontStyle: 'bold',
+      align: 'center',
+      lineSpacing: 3,
       stroke: '#0b0d10',
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(21);
+  }
+
+  private openGameMenu() {
+    if (this.menuOpen || this.gameOver || this.modalOpen) return;
+
+    this.cancelBuild();
+    this.closeContextMenu();
+    this.menuOpen = true;
+    this.modalOpen = true;
+
+    const add = <T extends Phaser.GameObjects.GameObject>(o: T): T => {
+      this.menuObjs.push(o);
+      return o;
+    };
+
+    add(this.add.rectangle(300, 500, WIDTH, HEIGHT, 0x000000, 0.7)
+      .setDepth(60)
+      .setInteractive());
+
+    const panel = add(this.add.graphics().setDepth(61));
+
+    this.drawPanelFrame(panel, 90, 300, 420, 420);
+
+    add(this.add.text(300, 336, 'MENU · JOGO PAUSADO', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '20px',
+      color: '#f0d58a',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(62));
+
+    const rows: Array<['music' | 'sfx' | 'voice', string]> = [
+      ['music', 'Música ambiente'],
+      ['sfx', 'Efeitos sonoros'],
+      ['voice', 'Vozes dos heróis'],
+    ];
+
+    rows.forEach(([key, label], i) => {
+      const text = () => `${label}: ${SFX.prefs[key] ? 'LIGADO' : 'DESLIGADO'}`;
+
+      const b = add(this.makeButton(
+        130, 370 + i * 62, text(), '#3a4a5a',
+        () => {
+          SFX.setPref(key, !SFX.prefs[key]);
+          this.setButtonLabel(b, text());
+        },
+        15, 340, 48,
+      ).setDepth(63));
+    });
+
+    let armed = false;
+
+    const restart = add(this.makeButton(
+      130, 566, 'REINICIAR PARTIDA', '#8a3a2c',
+      () => {
+        if (!armed) {
+          armed = true;
+          this.setButtonLabel(restart, 'TOQUE DE NOVO PARA CONFIRMAR');
+          return;
+        }
+
+        try { window.speechSynthesis.cancel(); } catch { /* ignora */ }
+
+        this.menuOpen = false;
+        this.modalOpen = false;
+        this.scene.restart(this.startData);
+      },
+      14, 340, 48,
+    ).setDepth(63));
+
+    add(this.makeButton(
+      130, 630, 'CONTINUAR', '#3a6a3a',
+      () => this.closeGameMenu(), 16, 340, 48,
+    ).setDepth(63));
+  }
+
+  private closeGameMenu() {
+    for (const o of this.menuObjs) {
+      if (o.active) this.killVisual(o);
+    }
+
+    this.menuObjs = [];
+    this.menuOpen = false;
+    this.modalOpen = false;
+  }
+
+  // Tipo da onda, para o jogador se preparar.
+  private waveTag(w: number): string {
+    if (w > MAX_WAVES) return '';
+    if (w % 5 === 3) return 'VOADORA';
+    if (w % 5 === 4) return 'IMUNE';
+    if (w % 5 === 0) return 'BOSS';
+
+    return '';
+  }
+
+  private nextWaveTip(w: number): string {
+    const tag = this.waveTag(w);
+
+    if (tag === 'VOADORA') {
+      return `\nPRÓXIMA ${w}: VOADORA! Voam reto até a fortaleza. Faça mais torres Balista (nv.5 lança rede) e Arcana/Guardiã para aproveitar a queda.`;
+    }
+
+    if (tag === 'IMUNE') {
+      return `\nPRÓXIMA ${w}: IMUNE a fogo e gelo! Use dano direto e o atordoamento da Balista.`;
+    }
+
+    if (tag === 'BOSS') {
+      return `\nPRÓXIMA ${w}: ONDA BOSS! Chefão com muita vida: reforce as torres e use as habilidades.`;
+    }
+
+    return '';
   }
 
   private showMessage(message: string) {
@@ -3892,6 +4673,8 @@ class GameScene extends BaseScene {
       return;
     }
 
+    this.heroSelected = false;
+    this.moveTarget = null;
     this.cancelBuild();
     this.selectedTower = null;
     this.rangeGraphics.clear();
@@ -3908,7 +4691,7 @@ class GameScene extends BaseScene {
       const st = TOWER_STATS[k];
       const label = this.stock[k] > 0
         ? `${st.name} · x${this.stock[k]}`
-        : `${st.name} · ${st.cost}`;
+        : `${st.name} · ${this.towerPrice(k)}`;
 
       this.addContextButton(
         xs[i], 876, label, colors[i],
@@ -4060,6 +4843,7 @@ class GameScene extends BaseScene {
       return;
     }
 
+    this.heroSelected = true;
     this.cancelBuild();
     this.selectedTower = null;
     this.rangeGraphics.clear();
@@ -4081,7 +4865,11 @@ class GameScene extends BaseScene {
       const rawRank = this.skillLevels[this.rankKey(skill)];
 
       this.contextObjects.push(
-        this.makeSkillIcon(x + 17, 886, skill, skill === 'aura' ? 1 : rank, () => this.useSkill(skill)),
+        this.makeSkillIcon(
+          x + 17, 886, skill,
+          skill === 'strike' && !this.ultAllowed() ? 0 : skill === 'aura' ? 1 : rank,
+          () => this.useSkill(skill),
+        ),
       );
 
       const name = this.add.text(
@@ -4123,7 +4911,7 @@ class GameScene extends BaseScene {
 
       const description = this.add.text(
         x, 930,
-        `${info.mana > 0 ? info.mana + ' mana' : 'PASSIVA'}\n${info.description}`,
+        `${skill === 'strike' && !this.ultAllowed() ? 'BLOQUEADO · ◆' + DIAMOND_COST.ult : info.mana > 0 ? info.mana + ' mana' : 'PASSIVA'}\n${info.description}`,
         {
           fontFamily: 'Arial, sans-serif',
           fontSize: '8px',
@@ -4230,7 +5018,9 @@ class GameScene extends BaseScene {
     );
 
     const sellValue = Math.floor(tower.totalInvested * 0.7);
-    const upgradeCost = 60 * tower.level;
+    const upgradeCost = Math.round(60 * tower.level * this.priceMult());
+    const maxLv = this.lv6[tower.kind] ? 6 : 5;
+    const needDia = tower.level === 5 && !this.lv6[tower.kind];
 
     const info = this.add.text(
       188, 870,
@@ -4248,9 +5038,11 @@ class GameScene extends BaseScene {
 
     this.addContextButton(
       188, 912,
-      tower.level >= 5 ? 'NÍVEL MÁXIMO' : `MELHORAR · ${upgradeCost}`,
-      tower.level >= 5 ? '#2b302b' : '#69502e',
-      () => this.upgradeTower(tower),
+      needDia
+        ? `LIBERAR NV.6 · ◆${DIAMOND_COST.tower}`
+        : tower.level >= maxLv ? 'NÍVEL MÁXIMO' : `MELHORAR · ${upgradeCost}`,
+      needDia ? '#3a5aa0' : tower.level >= maxLv ? '#2b302b' : '#69502e',
+      () => (needDia ? this.openDiamondShop() : this.upgradeTower(tower)),
       185, 28,
     );
 
@@ -4264,7 +5056,7 @@ class GameScene extends BaseScene {
 
     const hint = this.add.text(
       188, 950,
-      `${this.towerPowerText(tower)}\nA venda devolve 70% do valor investido.`,
+      `${this.towerPowerText(tower)}${tower.level >= 6 ? ' NV.6: empurra os monstros para trás.' : ''}\nA venda devolve 70% do valor investido.`,
       {
         fontFamily: 'Arial, sans-serif',
         fontSize: '9px',
@@ -4276,11 +5068,35 @@ class GameScene extends BaseScene {
   }
 
   private selectElementAt(x: number, y: number) {
-    // Tocar no herói abre o menu de habilidades (embaixo).
+    // Tocar no herói seleciona (e abre as habilidades) ou solta o herói.
     if (
       Phaser.Math.Distance.Between(x, y, this.hero.x, this.hero.y) < 30
     ) {
-      this.openHeroMenu();
+      if (this.heroSelected && !this.heroDead) {
+        this.heroSelected = false;
+        this.moveTarget = null;
+        this.closeContextMenu();
+        this.showMessage('Herói solto. Toque nele para selecionar de novo.');
+      } else {
+        this.moveTarget = null;
+        this.openHeroMenu();
+
+        if (this.heroSelected) {
+          this.sayHero('select');
+          this.emote(this.heroVisual, 'happy', 1000);
+          this.showMessage('Herói selecionado: toque em qualquer lugar do mapa para mover.');
+        }
+      }
+
+      return;
+    }
+
+    // Com o herói selecionado, qualquer toque no mapa é um destino.
+    if (this.heroSelected && !this.heroDead) {
+      this.moveTarget = {
+        x: Phaser.Math.Clamp(x, 18, WIDTH - 18),
+        y: Phaser.Math.Clamp(y, 175, 815),
+      };
       return;
     }
 
@@ -4321,6 +5137,8 @@ class GameScene extends BaseScene {
     }
 
     this.closeContextMenu();
+    this.heroSelected = false;
+    this.moveTarget = null;
     this.selectedTowerKind = kind;
     this.buildMode = true;
     this.selectedTower = null;
@@ -4329,19 +5147,21 @@ class GameScene extends BaseScene {
     const stats = TOWER_STATS[kind];
 
     this.buildInfoText.setText(
-      `${stats.name} | Dano ${stats.damage} | Alcance ${stats.range} | ${stats.cost} moedas\n` +
-      'Verde = posição válida. Toque no terreno para construir.',
+      `${stats.name} | Dano ${stats.damage} | Alcance ${stats.range} | ${this.towerPrice(kind)} moedas\n` +
+      'Arraste em qualquer lugar para mover. Verde = posição válida.',
     );
 
     this.buildInfoText.setVisible(true);
     this.buildExitText.setVisible(true);
     this.buildPreview.setVisible(true);
 
-    const pointer = this.input.activePointer;
-    this.updateBuildPreview(pointer.x, pointer.y);
+    // A sombra começa no meio da tela; arraste em qualquer lugar para movê-la.
+    this.buildPos = { x: 300, y: 487 };
+    this.buildDrag = null;
+    this.askBuild(this.buildPos.x, this.buildPos.y);
 
     this.showMessage(
-      `Posicione a ${stats.name}. Você pode construir várias torres Arcanas.`,
+      `Posicione a ${stats.name}: arraste o dedo em qualquer parte do mapa para mover a sombra, depois toque em CONSTRUIR.`,
     );
 
     this.refreshInterface();
@@ -4414,9 +5234,7 @@ class GameScene extends BaseScene {
     y: number,
     kind: TowerKind,
   ): boolean {
-    const stats = TOWER_STATS[kind];
-
-    if (this.coins < stats.cost && this.stock[kind] <= 0) return false;
+    if (this.coins < this.towerPrice(kind) && this.stock[kind] <= 0) return false;
 
     // Área de construção ampliada.
     if (x < 22 || x > WIDTH - 22) return false;
@@ -4434,21 +5252,25 @@ class GameScene extends BaseScene {
   }
 
   // Toque no mapa: fixa a sombra no local e pergunta antes de construir.
+  // A sombra da torre anda em relação ao dedo (o dedo não cobre o local).
+  private moveBuildGhost(dx: number, dy: number) {
+    this.buildPos = {
+      x: Phaser.Math.Clamp(this.buildPos.x + dx, 20, WIDTH - 20),
+      y: Phaser.Math.Clamp(this.buildPos.y + dy, 165, 815),
+    };
+
+    this.pendingBuild = { ...this.buildPos };
+    this.updateBuildPreview(this.buildPos.x, this.buildPos.y);
+  }
+
   private askBuild(x: number, y: number) {
     if (!this.buildMode) return;
 
     const kind = this.selectedTowerKind;
     const stats = TOWER_STATS[kind];
 
-    if (this.coins < stats.cost && this.stock[kind] <= 0) {
+    if (this.coins < this.towerPrice(kind) && this.stock[kind] <= 0) {
       this.exitBuild('Moedas insuficientes para construir esta torre.');
-      return;
-    }
-
-    if (!this.isValidBuildLocation(x, y, kind)) {
-      this.exitBuild(
-        'Local inválido: construção encerrada. Escolha a torre de novo para construir.',
-      );
       return;
     }
 
@@ -4459,7 +5281,7 @@ class GameScene extends BaseScene {
     // openContextPanel limpa o menu, mas não deve perder o local escolhido.
     this.pendingBuild = { x, y };
 
-    const price = this.stock[kind] > 0 ? 'do estoque' : `${stats.cost} moedas`;
+    const price = this.stock[kind] > 0 ? 'do estoque' : `${this.towerPrice(kind)} moedas`;
 
     this.addContextButton(
       187, 876, `CONSTRUIR · ${price}`, '#2f6140',
@@ -4483,7 +5305,7 @@ class GameScene extends BaseScene {
     const kind = this.selectedTowerKind;
     const stats = TOWER_STATS[kind];
 
-    if (this.coins < stats.cost && this.stock[kind] <= 0) {
+    if (this.coins < this.towerPrice(kind) && this.stock[kind] <= 0) {
       this.showMessage('Moedas insuficientes para construir esta torre.');
       return;
     }
@@ -4509,14 +5331,15 @@ class GameScene extends BaseScene {
       kind,
       damage: stats.damage,
       fireRate: stats.fireRate,
-      cost: stats.cost,
-      totalInvested: stats.cost,
+      cost: this.towerPrice(kind),
+      totalInvested: this.towerPrice(kind),
       auraUntil: 0,
       hp: towerMaxHp(1),
       maxHp: towerMaxHp(1),
       hitAt: 0,
       streak: 0,
       lastShotAt: 0,
+      netAt: 0,
     };
 
     this.towers.push(tower);
@@ -4524,8 +5347,10 @@ class GameScene extends BaseScene {
     if (this.stock[kind] > 0) {
       this.stock[kind]--;
     } else {
-      this.coins -= stats.cost;
+      this.coins -= this.towerPrice(kind);
     }
+
+    SFX.play('build');
 
     // Efeito de construção
     const ring = this.add.circle(x, y, 10, stats.color, 0.5)
@@ -4543,14 +5368,13 @@ class GameScene extends BaseScene {
     // Continua em modo de construção: a sombra segue o dedo para a próxima.
     this.closeContextMenu();
 
-    const canAgain = this.coins >= stats.cost || this.stock[kind] > 0;
+    const canAgain = this.coins >= this.towerPrice(kind) || this.stock[kind] > 0;
 
     if (canAgain) {
-      const pointer = this.input.activePointer;
-      this.updateBuildPreview(pointer.x, pointer.y);
+      this.askBuild(this.buildPos.x, this.buildPos.y);
 
       this.showMessage(
-        `${stats.name} construída! Toque em outro local para construir mais, ou em X SAIR / ESC para encerrar.`,
+        `${stats.name} construída! Arraste a sombra para outro local e toque em CONSTRUIR, ou use X SAIR / CANCELAR para encerrar.`,
       );
     } else {
       this.cancelBuild();
@@ -4568,12 +5392,17 @@ class GameScene extends BaseScene {
       return;
     }
 
-    if (tower.level >= 5) {
+    if (tower.level >= 5 && !this.lv6[tower.kind]) {
+      this.showMessage('O nível 6 exige diamantes: libere na loja de diamantes.');
+      return;
+    }
+
+    if (tower.level >= 6) {
       this.showMessage('Esta torre já atingiu o nível máximo.');
       return;
     }
 
-    const cost = 60 * tower.level;
+    const cost = Math.round(60 * tower.level * this.priceMult());
 
     if (this.coins < cost) {
       this.showMessage(`Você precisa de ${cost} moedas para melhorar.`);
@@ -4581,6 +5410,7 @@ class GameScene extends BaseScene {
     }
 
     this.coins -= cost;
+    SFX.play('upgrade');
     tower.totalInvested += cost;
     tower.level++;
 
@@ -4603,12 +5433,24 @@ class GameScene extends BaseScene {
       );
     }
 
+    if (tower.level === 6) {
+      const halo = this.add.circle(0, 2, 31, 0xffffff, 0.1)
+        .setStrokeStyle(3, 0x9fe8ff, 0.95)
+        .setBlendMode(Phaser.BlendModes.ADD);
+
+      tower.visual.add(halo);
+
+      this.floatText(
+        tower.body.x, tower.body.y - 52, 'NV.6: EMPURRÃO!', '#9fe8ff', 12,
+      );
+    }
+
     const levelText = tower.visual.getData(
       'levelText',
     ) as Phaser.GameObjects.Text;
 
     if (levelText) {
-      levelText.setText(['I', 'II', 'III', 'IV', 'V'][tower.level - 1]);
+      levelText.setText(['I', 'II', 'III', 'IV', 'V', 'VI'][tower.level - 1]);
     }
 
     const ring = this.add.circle(
@@ -4668,7 +5510,7 @@ class GameScene extends BaseScene {
   private startWave() {
     if (this.gameOver || this.modalOpen) return;
 
-    const next = this.wave + 1;
+    let next = this.wave + 1;
 
     if (next > MAX_WAVES) {
       this.showMessage('Todas as 100 ondas já foram iniciadas.');
@@ -4679,12 +5521,225 @@ class GameScene extends BaseScene {
     // (com monstros mais rápidos) até juntar moedas.
     const up = this.nextUpgrade();
 
-    // A pergunta volta a cada onda, até o jogador conseguir pagar.
-    if (up !== null && next >= this.gateWave(up) && this.skipGateWave !== next) {
-      this.openUpgrade(up, true);
+    // A pergunta volta a cada onda, até o jogador conseguir pagar. Sem o
+    // upgrade, só dá para repetir a última onda do mundo atual.
+    if (up !== null && next >= this.gateWave(up)) {
+      if (!this.repeatGate) {
+        this.openUpgrade(up, true);
+        return;
+      }
+
+      this.repeatGate = false;
+      next = this.gateWave(up) - 1;
+    }
+
+    // Ondas de múltiplo de 5: vídeo de apresentação do chefão (5 s).
+    if (next % 5 === 0) {
+      this.playBossIntro(next, () => this.launchWave(next));
       return;
     }
 
+    this.launchWave(next);
+  }
+
+  private playBossIntro(w: number, then: () => void) {
+    this.closeContextMenu();
+    this.menuOpen = true;
+    this.modalOpen = true;
+
+    const list = this.buildWave(w);
+    const spec = list.find(x => x.tier === 'boss')
+      ?? list.find(x => x.tier === 'elite')
+      ?? list[0];
+
+    const INFO: Record<EnemyKind, {
+      color: string;
+      trait: string;
+      enter: 'slam' | 'dash' | 'ghost' | 'stomp' | 'flicker';
+      elite: string[];
+      boss: string;
+    }> = {
+      comum: {
+        color: '#ff7a5a', trait: 'Uma horda sem fim',
+        enter: 'slam',
+        elite: ['Somos muitos, e você está sozinho!', 'Cada um que cai dá lugar a dois!'],
+        boss: 'Vocês não passarão!',
+      },
+      couracado: {
+        color: '#9fb4c8', trait: 'Armadura impenetrável',
+        enter: 'stomp',
+        elite: ['Suas flechas só fazem cócegas.', 'Aço não se curva diante de ninguém!'],
+        boss: 'Sua fortaleza vai ruir sob o meu peso!',
+      },
+      agil: {
+        color: '#ffe05a', trait: 'Rápido demais para ver',
+        enter: 'dash',
+        elite: ['Piscou? Já passei!', 'Tente acertar o que você não vê!'],
+        boss: 'Cheguei antes mesmo do seu medo!',
+      },
+      antimagia: {
+        color: '#c08aff', trait: 'A magia não o toca',
+        enter: 'flicker',
+        elite: ['Sua magia é só barulho.', 'Os feitiços morrem ao me tocar!'],
+        boss: 'Cada feitiço seu virará pó!',
+      },
+      pesado: {
+        color: '#ff9a4a', trait: 'Uma montanha de aço',
+        enter: 'stomp',
+        elite: ['O chão treme por mim!', 'Sinta o peso da minha fúria!'],
+        boss: 'Ajoelhe-se, comandante!',
+      },
+      espectral: {
+        color: '#8affea', trait: 'Nem a morte o detém',
+        enter: 'ghost',
+        elite: ['Já estou morto. Como me vencer?', 'Atravesso muros e esperanças…'],
+        boss: 'Ninguém chegou tão longe… e voltou.',
+      },
+    };
+
+    const info = INFO[spec.kind];
+    const isBossTier = spec.tier === 'boss';
+
+    const phrase = w === MAX_WAVES
+      ? 'Eu sou o fim de todas as coisas!'
+      : isBossTier
+        ? info.boss
+        : info.elite[(w / 5) % info.elite.length | 0];
+
+    const objs: Phaser.GameObjects.GameObject[] = [];
+    const add = <T extends Phaser.GameObjects.GameObject>(o: T): T => {
+      objs.push(o);
+      return o;
+    };
+
+    let finished = false;
+
+    const finish = () => {
+      if (finished) return;
+
+      finished = true;
+
+      for (const o of objs) {
+        if (o.active) this.killVisual(o);
+      }
+
+      this.menuOpen = false;
+      this.modalOpen = false;
+      then();
+    };
+
+    add(this.add.rectangle(300, 500, WIDTH, HEIGHT, 0x000000, 0.92)
+      .setDepth(70)
+      .setInteractive());
+
+    const glow = add(this.add.rectangle(300, 500, WIDTH, HEIGHT, 0x8a0f0f, 0)
+      .setDepth(71));
+
+    this.tweens.add({
+      targets: glow, fillAlpha: 0.35, duration: 700, yoyo: true, repeat: 3,
+    });
+
+    const boss = add(this.getEnemyVisual(
+      spec.kind, spec.tier, true, 300, 540, this.enemyFamily(),
+    ));
+
+    const big = isBossTier ? 3.4 : 3.0;
+
+    boss.setDepth(72).setScale(0.4).setAlpha(0);
+
+    if (info.enter === 'dash') {
+      boss.setPosition(-220, 540);
+      this.tweens.add({
+        targets: boss, x: 300, scale: big, alpha: 1,
+        duration: 350, delay: 300, ease: 'Cubic.easeOut',
+      });
+    } else if (info.enter === 'ghost' || info.enter === 'flicker') {
+      this.tweens.add({
+        targets: boss, scale: big, duration: 900, delay: 300,
+      });
+      this.tweens.add({
+        targets: boss, alpha: { from: 0, to: 0.9 }, duration: 160,
+        delay: 300, yoyo: true, repeat: info.enter === 'flicker' ? 9 : 3,
+        onComplete: () => boss.setAlpha(info.enter === 'ghost' ? 0.75 : 1),
+      });
+    } else {
+      this.tweens.add({
+        targets: boss, scale: big, alpha: 1,
+        duration: info.enter === 'stomp' ? 1000 : 700,
+        delay: 300, ease: 'Back.easeOut',
+      });
+    }
+
+    this.tweens.add({
+      targets: boss, scale: big * 1.15, duration: 4000, delay: 1300,
+      ease: 'Sine.easeInOut',
+    });
+
+    add(this.add.text(300, 190, `ONDA ${w}`, {
+      fontFamily: 'Georgia, serif',
+      fontSize: '20px',
+      color: '#d8c89a',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(73));
+
+    const name = add(this.add.text(
+      300, 232, `${isBossTier ? 'CHEFÃO' : 'ELITE'} · ${ENEMY_TYPES[spec.kind].name}`,
+      {
+        fontFamily: 'Georgia, serif',
+        fontSize: '32px',
+        color: info.color,
+        fontStyle: 'bold',
+        stroke: '#000000',
+        strokeThickness: 6,
+      },
+    ).setOrigin(0.5).setDepth(73).setAlpha(0));
+
+    this.tweens.add({ targets: name, alpha: 1, duration: 500, delay: 800 });
+
+    add(this.add.text(300, 270, info.trait, {
+      fontFamily: 'Georgia, serif',
+      fontSize: '16px',
+      fontStyle: 'italic',
+      color: '#d8c89a',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(73));
+
+    const quote = add(this.add.text(300, 800, `“${phrase}”`, {
+      fontFamily: 'Georgia, serif',
+      fontSize: '28px',
+      fontStyle: 'italic',
+      color: '#ffe9b0',
+      align: 'center',
+      wordWrap: { width: 500 },
+      stroke: '#000000',
+      strokeThickness: 5,
+    }).setOrigin(0.5).setDepth(73).setAlpha(0));
+
+    this.tweens.add({ targets: quote, alpha: 1, duration: 600, delay: 2000 });
+
+    add(this.add.text(300, 968, 'toque para pular', {
+      fontFamily: 'Arial, sans-serif', fontSize: '11px', color: '#8a8a8a',
+    }).setOrigin(0.5).setDepth(73));
+
+    const heavy = info.enter === 'stomp';
+
+    this.cameras.main.shake(heavy ? 700 : 500, heavy ? 0.02 : 0.012);
+    this.time.delayedCall(2100, () => this.cameras.main.shake(400, heavy ? 0.018 : 0.01));
+    if (heavy) this.time.delayedCall(1100, () => this.cameras.main.shake(400, 0.016));
+
+    SFX.play('boss');
+    SFX.say(phrase, 0.3, 0.8);
+
+    this.time.delayedCall(1500, () => {
+      if (!finished) this.input.once('pointerdown', finish);
+    });
+
+    this.time.delayedCall(5000, finish);
+  }
+
+  private launchWave(next: number) {
     this.closeContextMenu();
     this.wave = next;
 
@@ -4693,6 +5748,7 @@ class GameScene extends BaseScene {
 
     this.activeWaves.set(waveId, { queue, spawningFinished: false });
     this.showMessage(this.waveAnnouncement(waveId, queue));
+    SFX.play('wave');
 
     const spawnNext = () => {
       if (this.gameOver) return;
@@ -4727,7 +5783,13 @@ class GameScene extends BaseScene {
       this.nextRoute = route === 'left' ? 'right' : 'left';
     }
 
-    const path = route === 'left' ? LEFT_PATH : RIGHT_PATH;
+    // Ondas voadoras (3, 8, 13... 98): voam em linha reta até a fortaleza.
+    const flying = waveId % 5 === 3;
+    // Ondas imunes (4, 9, 14... 99): terrestres, imunes a fogo e gelo.
+    const immune = waveId % 5 === 4;
+
+    const road = route === 'left' ? LEFT_PATH : RIGHT_PATH;
+    const path = flying ? [road[0], road[road.length - 1]] : road;
     const start = path[0];
 
     const tierSize = tier === 'boss' ? 1.9 : tier === 'elite' ? 1.35 : 1;
@@ -4740,6 +5802,9 @@ class GameScene extends BaseScene {
       * type.hp * hpTier;
 
     if (this.finalChoice === 'real') hp *= 2;
+
+    // Ondas imunes: 1,2x vida e 1,2x velocidade.
+    if (immune) hp *= 1.2;
     hp = Math.max(
       2,
       Math.round(hp * (this.finalChoice === 'tech' ? 1 : ENEMY_HP_MULT)),
@@ -4754,9 +5819,9 @@ class GameScene extends BaseScene {
     const speed = (strong ? 40 : 55 + Math.min(waveId, 20))
       * ENEMY_SPEED_MULT
       * waveSpeedFactor(waveId)
-      * this.overdueSpeed(waveId)
       * type.speed
-      * (tier === 'boss' ? 0.75 : tier === 'elite' ? 0.9 : 1);
+      * (tier === 'boss' ? 0.75 : tier === 'elite' ? 0.9 : 1)
+      * (immune ? 1.2 : 1);
 
     const body = this.add.circle(
       start.x, start.y, (strong ? 19 : 14) * size, 0x000000, 0,
@@ -4766,6 +5831,8 @@ class GameScene extends BaseScene {
       spec.kind, tier, strong, start.x, start.y, this.enemyFamily(),
     );
     visual.setScale(size);
+
+    if (flying) this.addWings(visual, this.enemyFamily());
 
     const healthBar = this.healthLayer;
 
@@ -4798,6 +5865,9 @@ class GameScene extends BaseScene {
       burnDps: 0,
       stunUntil: 0,
       tint: 0,
+      flying,
+      immune,
+      netUntil: 0,
     };
 
     this.enemies.push(enemy);
@@ -4941,7 +6011,7 @@ class GameScene extends BaseScene {
       if (!enemy.alive) continue;
 
       // Fogo: dano contínuo por cerca de 2 segundos.
-      if (enemy.burnUntil > nowMs) {
+      if (!this.fireIceImmune(enemy, nowMs) && enemy.burnUntil > nowMs) {
         this.damageEnemy(enemy, enemy.burnDps * delta / 1000, true);
         if (!enemy.alive) continue;
       }
@@ -4974,7 +6044,10 @@ class GameScene extends BaseScene {
       const dx = target.x - enemy.body.x;
       const dy = target.y - enemy.body.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
-      const slow = enemy.slowUntil > nowMs ? 0.5 : 1;
+      const netted = enemy.flying && nowMs < enemy.netUntil;
+      const slow = netted
+        ? 0.04
+        : !this.fireIceImmune(enemy, nowMs) && enemy.slowUntil > nowMs ? 0.5 : 1;
       const stunned = enemy.stunUntil > nowMs;
       const step = stunned ? 0 : enemy.speed * slow * delta / 1000;
       const angle = Math.atan2(dy, dx);
@@ -4995,7 +6068,7 @@ class GameScene extends BaseScene {
       const enemyRadius = (enemy.strong ? 16 : 12) * enemy.size;
       let hit: Blocker | null = null;
 
-      for (const b of blockers) {
+      for (const b of (enemy.flying && !netted ? [] : blockers)) {
         if (b.soft && nowMs < enemy.ghostUntil) continue;
 
         const rx = enemy.body.x - b.x;
@@ -5023,10 +6096,13 @@ class GameScene extends BaseScene {
         if (!hit || (hit.soft && !b.soft)) hit = b;
       }
 
-      this.clampToRoad(enemy);
+      if (!enemy.flying) this.clampToRoad(enemy);
 
       // Sem passagem: se o monstro está travado, ataca o que o bloqueia.
       const moved = Math.hypot(enemy.body.x - prevX, enemy.body.y - prevY);
+      let atkK = 0;
+      let lungeX = 0;
+      let lungeY = 0;
 
       if (hit && moved < step * 0.35) {
         enemy.blockedMs += delta;
@@ -5036,8 +6112,23 @@ class GameScene extends BaseScene {
             enemy.ghostUntil = nowMs + 1500;
             enemy.blockedMs = 0;
           }
-        } else if (enemy.blockedMs > 400) {
+        } else if (
+          // Paciência: 0,4 s travado (chefes e ondas de múltiplo de 5: 0,2 s).
+          enemy.blockedMs > (enemy.tier === 'boss' || enemy.waveId % 5 === 0 ? 200 : 400)
+        ) {
           const dmg = enemy.dps * delta / 1000;
+
+          // Animação de ataque: avança no alvo e incha a cada golpe.
+          const ph = ((nowMs + enemy.phase * 100) % 420) / 420;
+          atkK = ph < 0.35 ? ph / 0.35 : 1 - (ph - 0.35) / 0.65;
+
+          const bd = Math.hypot(hit.x - enemy.body.x, hit.y - enemy.body.y) || 1;
+
+          lungeX = (hit.x - enemy.body.x) / bd * 10 * atkK * enemy.size;
+          lungeY = (hit.y - enemy.body.y) / bd * 10 * atkK * enemy.size;
+
+          this.fxLayer.fillStyle(0xff5a3a, 0.45 * atkK);
+          this.fxLayer.fillCircle(hit.x, hit.y, 7 + 7 * atkK);
 
           if (hit.tower) this.hurtTower(hit.tower, dmg);
           else if (hit.hero) this.hurtHero(dmg);
@@ -5046,7 +6137,9 @@ class GameScene extends BaseScene {
         enemy.blockedMs = Math.max(0, enemy.blockedMs - delta * 2);
       }
 
-      enemy.visual.setPosition(enemy.body.x, enemy.body.y);
+      const lift = enemy.flying && !netted ? 20 : 0;
+
+      enemy.visual.setPosition(enemy.body.x + lungeX, enemy.body.y - lift + lungeY);
 
       // Com muitos inimigos, a animação é atualizada em quadros alternados.
       if (!crowded || ((idx + this.frameCount) & 1) === 0) {
@@ -5055,23 +6148,26 @@ class GameScene extends BaseScene {
 
         enemy.visual.setScale(
           facing * enemy.size,
-          enemy.size * (1 + Math.sin(t) * 0.05),
+          enemy.size * (1 + Math.sin(t) * 0.05 + atkK * 0.2),
         );
 
         const legs = enemy.visual.getData('legs') as Phaser.GameObjects.Rectangle[] | undefined;
         if (legs) this.animateLegs(legs, t * 1.5, true);
-        else enemy.visual.y = enemy.body.y + Math.sin(t * 1.5) * 1.6;
+        else enemy.visual.y = enemy.body.y - lift + lungeY + Math.sin(t * 1.5) * 1.6;
       }
 
-      const want = enemy.slowUntil > nowMs
+      const frozen = !this.fireIceImmune(enemy, nowMs);
+      const want = frozen && enemy.slowUntil > nowMs
         ? 0x9fd8ff
-        : enemy.burnUntil > nowMs ? 0xffa060 : 0;
+        : frozen && enemy.burnUntil > nowMs ? 0xffa060 : 0;
 
       if (want !== enemy.tint) this.setEnemyTint(enemy, want);
 
       if (
         enemy.burnUntil > nowMs ||
         enemy.slowUntil > nowMs ||
+        enemy.immune ||
+        netted ||
         stunned
       ) {
         this.drawEnemyStatus(enemy, nowMs, stunned);
@@ -5081,6 +6177,11 @@ class GameScene extends BaseScene {
     }
 
     this.drawUnitBars();
+  }
+
+  // Imunes a fogo e gelo: ondas imunes e voadores no ar (rede os derruba).
+  private fireIceImmune(enemy: Enemy, now: number): boolean {
+    return enemy.immune || (enemy.flying && now >= enemy.netUntil);
   }
 
   private setEnemyTint(enemy: Enemy, color: number) {
@@ -5100,7 +6201,7 @@ class GameScene extends BaseScene {
     const y = enemy.body.y;
     const sz = enemy.size;
 
-    if (enemy.burnUntil > now) {
+    if (!this.fireIceImmune(enemy, now) && enemy.burnUntil > now) {
       for (let k = 0; k < 3; k++) {
         const fx = x + (k - 1) * 8 * sz;
         const fy = y - (4 + (k % 2) * 6) * sz;
@@ -5113,7 +6214,28 @@ class GameScene extends BaseScene {
       }
     }
 
-    if (enemy.slowUntil > now) {
+    if (enemy.immune) {
+      g.lineStyle(2, 0xc9a0ff, 0.75);
+      g.strokeCircle(x, y - 4 * sz, 22 * sz);
+      g.lineStyle(1, 0xffffff, 0.5);
+      g.strokeCircle(x, y - 4 * sz, 25 * sz + Math.sin(now / 150) * 2);
+    }
+
+    if (enemy.flying && enemy.netUntil > now) {
+      g.lineStyle(1.5, 0xe8e8e8, 0.9);
+      g.strokeCircle(x, y, 20 * sz);
+      g.strokeCircle(x, y, 11 * sz);
+
+      for (let k = 0; k < 6; k++) {
+        const a = k * Math.PI / 3;
+
+        g.lineBetween(
+          x, y, x + Math.cos(a) * 20 * sz, y + Math.sin(a) * 20 * sz,
+        );
+      }
+    }
+
+    if (!this.fireIceImmune(enemy, now) && enemy.slowUntil > now) {
       g.fillStyle(0xbfe6ff, 0.28);
       g.fillEllipse(x, y + 12 * sz, 38 * sz, 13 * sz);
       g.lineStyle(1.5, 0xffffff, 0.7);
@@ -5292,6 +6414,8 @@ class GameScene extends BaseScene {
 
     this.heroHp -= dmg;
     this.heroHitAt = now;
+    SFX.play('hurt');
+    this.emote(this.heroVisual, 'hurt', 500);
 
     if (this.heroHp <= 0) this.killHero();
   }
@@ -5300,6 +6424,8 @@ class GameScene extends BaseScene {
     this.heroHp = 0;
     this.heroDead = true;
     this.heroDeaths++;
+    SFX.play('death');
+    this.sayHero('death');
     this.cloneUntil = 0;
 
     this.heroVisual.setVisible(false);
@@ -5311,7 +6437,7 @@ class GameScene extends BaseScene {
   }
 
   private reviveCost(): number {
-    return 1000 * this.heroDeaths;
+    return Math.round(1000 * this.heroDeaths * this.priceMult());
   }
 
   private openReviveModal() {
@@ -5319,7 +6445,7 @@ class GameScene extends BaseScene {
 
     const body =
       'Seu herói foi derrotado e está fora da batalha: sem ataques, sem habilidades e sem bloquear o caminho.\n\n' +
-      `Reviver custa ${cost} moedas (a cada morte o preço sobe 1000).\n` +
+      `Reviver custa ${cost} moedas (o preço sobe a cada morte e com o nível).\n` +
       `Você tem ${this.coins} moedas.`;
 
     this.openModal('HERÓI DERROTADO', body, [
@@ -5346,6 +6472,8 @@ class GameScene extends BaseScene {
     if (this.coins < cost) return;
 
     this.coins -= cost;
+    SFX.play('revive');
+    this.sayHero('revive');
     this.heroDead = false;
     this.heroHp = this.heroMaxHp;
     this.heroInvulnUntil = this.time.now + 3000;
@@ -5427,6 +6555,8 @@ class GameScene extends BaseScene {
 
     if (enemy.hp > 0) return;
 
+    SFX.play('kill');
+
     const distance = Phaser.Math.Distance.Between(
       this.hero.x, this.hero.y,
       enemy.body.x, enemy.body.y,
@@ -5490,7 +6620,7 @@ class GameScene extends BaseScene {
       if (remaining) continue;
 
       this.activeWaves.delete(waveId);
-      this.showMessage(`Onda ${waveId} concluída!`);
+      this.showMessage(`Onda ${waveId} concluída!` + this.nextWaveTip(waveId + 1));
 
       if (waveId === MAX_WAVES) {
         this.victory();
@@ -5514,6 +6644,10 @@ class GameScene extends BaseScene {
     for (const tower of this.towers) {
       if (tower.hp < tower.maxHp && now - tower.hitAt > 4000) {
         tower.hp = Math.min(tower.maxHp, tower.hp + tower.maxHp * 0.02 * delta / 1000);
+      }
+
+      if (tower.kind === 'rapid' && tower.level >= 5 && now >= tower.netAt) {
+        this.tryNet(tower, now);
       }
 
       tower.cooldown -= delta;
@@ -5541,7 +6675,7 @@ class GameScene extends BaseScene {
       const boost = boosts[tower.kind];
       let rate = tower.fireRate / (boost ? boost.spd : 1);
 
-      // Besteira nível 5: modo metralhadora
+      // Balista nível 5: modo metralhadora
       let stunNow = false;
 
       if (tower.kind === 'rapid' && tower.level >= 5) {
@@ -5560,6 +6694,9 @@ class GameScene extends BaseScene {
 
       tower.cooldown = rate;
       this.fireProjectile(tower, target);
+      SFX.play(('t_' + tower.kind) as SfxName);
+
+      if (tower.level >= 6) this.pushWave(target);
 
       let raw = tower.damage * tower.level;
       if (boost) raw *= boost.dmg;
@@ -5580,6 +6717,86 @@ class GameScene extends BaseScene {
         }
       }
     }
+  }
+
+  // Balista nv.5: lança uma rede em área num voador (recarga de 12 s).
+  private tryNet(tower: Tower, now: number) {
+    let target: Enemy | undefined;
+    let closest = tower.range;
+
+    for (const e of this.enemies) {
+      if (!e.alive || !e.flying || now < e.netUntil) continue;
+
+      const d = Phaser.Math.Distance.Between(
+        tower.body.x, tower.body.y, e.body.x, e.body.y,
+      );
+
+      if (d <= closest) {
+        closest = d;
+        target = e;
+      }
+    }
+
+    if (!target) return;
+
+    tower.netAt = now + 12000;
+
+    const tx = target.body.x;
+    const ty = target.body.y;
+    const ball = this.add.circle(tower.body.x, tower.body.y - 10, 6, 0xeeeeee, 1)
+      .setStrokeStyle(2, 0x888888, 1)
+      .setDepth(12);
+
+    this.tweens.add({
+      targets: ball,
+      x: tx,
+      y: ty - 18,
+      duration: 220,
+      onComplete: () => {
+        ball.destroy();
+
+        const web = this.add.graphics().setDepth(12);
+
+        web.lineStyle(2, 0xf2f2f2, 0.95);
+        web.strokeCircle(0, 0, 70);
+        web.strokeCircle(0, 0, 40);
+        web.strokeCircle(0, 0, 18);
+
+        for (let k = 0; k < 8; k++) {
+          const a = k * Math.PI / 4;
+          web.lineBetween(0, 0, Math.cos(a) * 70, Math.sin(a) * 70);
+        }
+
+        web.setPosition(tx, ty).setScale(0.3);
+
+        this.tweens.add({
+          targets: web,
+          scale: 1,
+          duration: 180,
+          onComplete: () => {
+            this.tweens.add({
+              targets: web,
+              alpha: 0,
+              duration: 500,
+              onComplete: () => web.destroy(),
+            });
+          },
+        });
+
+        const t = this.time.now;
+
+        for (const e of this.enemies) {
+          if (!e.alive || !e.flying) continue;
+
+          if (Phaser.Math.Distance.Between(e.body.x, e.body.y, tx, ty) <= 70) {
+            e.netUntil = t + 4000;
+          }
+        }
+
+        SFX.play('net');
+        this.floatText(tx, ty - 40, 'REDE!', '#f0f0f0', 14);
+      },
+    });
   }
 
   private fireProjectile(tower: Tower, target: Enemy) {
@@ -5693,37 +6910,37 @@ class GameScene extends BaseScene {
   // HERÓI E MOVIMENTAÇÃO
   // ==================================================
 
-  private moveKnob(x: number, y: number) {
-    this.joystickKnob.setPosition(x, y);
-    this.joystickShine.setPosition(x - 6, y - 7);
-  }
-
-  private updateJoystick(x: number, y: number) {
-    const dx = x - this.joystickCenter.x;
-    const dy = y - this.joystickCenter.y;
-    const length = Math.sqrt(dx * dx + dy * dy) || 1;
-    const radius = 35;
-    const scale = Math.min(length, radius) / length;
-
-    this.moveKnob(
-      this.joystickCenter.x + dx * scale,
-      this.joystickCenter.y + dy * scale,
-    );
-
-    this.joystickX = dx * scale / radius;
-    this.joystickY = dy * scale / radius;
-  }
-
   private moveHero(delta: number) {
-    if (this.heroDead) return;
+    if (this.heroDead) {
+      this.moveTarget = null;
+      return;
+    }
 
-    let dx = this.joystickX;
-    let dy = this.joystickY;
+    let dx = 0;
+    let dy = 0;
 
     if (this.cursors.left.isDown || this.keys.a.isDown) dx = -1;
     if (this.cursors.right.isDown || this.keys.d.isDown) dx = 1;
     if (this.cursors.up.isDown || this.keys.w.isDown) dy = -1;
     if (this.cursors.down.isDown || this.keys.s.isDown) dy = 1;
+
+    let toTarget = Infinity;
+
+    if (dx !== 0 || dy !== 0) {
+      this.moveTarget = null;
+    } else if (this.moveTarget) {
+      const mx = this.moveTarget.x - this.hero.x;
+      const my = this.moveTarget.y - this.hero.y;
+      const d = Math.sqrt(mx * mx + my * my);
+
+      if (d < 4) {
+        this.moveTarget = null;
+      } else {
+        dx = mx / d;
+        dy = my / d;
+        toTarget = d;
+      }
+    }
 
     if (dx === 0 && dy === 0) {
       this.animateLegs(this.heroLegs, 0, false);
@@ -5731,7 +6948,10 @@ class GameScene extends BaseScene {
     }
 
     const length = Math.sqrt(dx * dx + dy * dy);
-    const speed = this.heroSpeed * (this.time.now < this.cloneUntil ? 1.4 : 1) * delta / 1000;
+    const speed = Math.min(
+      this.heroSpeed * (this.time.now < this.cloneUntil ? 1.4 : 1) * delta / 1000,
+      toTarget,
+    );
 
     this.hero.x = Phaser.Math.Clamp(
       this.hero.x + dx / length * speed, 18, WIDTH - 18,
@@ -5747,6 +6967,55 @@ class GameScene extends BaseScene {
 
     if (dx !== 0) {
       this.heroVisual.setScale(dx < 0 ? -1 : 1, 1);
+    }
+  }
+
+  private sayHero(ev: string) {
+    const l = HERO_LINES[this.heroKind];
+    let text: string | undefined;
+
+    if (ev === 'select') text = l.select[Math.floor(Math.random() * l.select.length)];
+    else if (ev === 'level') text = l.level;
+    else if (ev === 'death') text = l.death;
+    else if (ev === 'revive') text = l.revive;
+    else text = l.skill[ev];
+
+    if (text) SFX.say(text, l.pitch, l.rate);
+  }
+
+  private emote(c: Phaser.GameObjects.Container, emo: Emotion, ms = 600) {
+    if (!c.active) return;
+
+    this.setFace(c, emo);
+
+    this.time.delayedCall(ms, () => {
+      if (c.active) this.setFace(c, 'neutral');
+    });
+  }
+
+  private drawHeroSelect() {
+    const g = this.selectGfx;
+    g.clear();
+
+    if (!this.heroSelected || this.heroDead) return;
+
+    const t = this.time.now / 300;
+    const w = 46 + Math.sin(t) * 4;
+    const h = 18 + Math.sin(t) * 1.5;
+
+    g.fillStyle(0xfff0a0, 0.18);
+    g.fillEllipse(this.hero.x, this.hero.y + 16, w, h);
+    g.lineStyle(3, 0xfff0a0, 0.9);
+    g.strokeEllipse(this.hero.x, this.hero.y + 16, w, h);
+
+    if (this.moveTarget) {
+      const m = this.moveTarget;
+      const r = 8 + Math.sin(t * 2) * 2;
+
+      g.lineStyle(2, 0x9fe08a, 0.9);
+      g.strokeCircle(m.x, m.y, r);
+      g.lineBetween(m.x - 5, m.y, m.x + 5, m.y);
+      g.lineBetween(m.x, m.y - 5, m.x, m.y + 5);
     }
   }
 
@@ -5784,35 +7053,177 @@ class GameScene extends BaseScene {
 
     if (target) {
       this.heroAttackCooldown = this.heroAttackRate * (this.time.now < this.cloneUntil ? 0.7 : 1);
-      this.fireHeroProjectile(target);
-      this.hitTarget(target, this.heroDamage, this.hero.x, this.hero.y);
-
-      this.tweens.add({
-        targets: this.heroVisual,
-        angle: this.heroVisual.scaleX < 0 ? -8 : 8,
-        duration: 75,
-        yoyo: true,
-      });
+      this.strike(
+        this.heroKind, this.hero.x, this.hero.y, target,
+        this.heroDamage, this.heroVisual, true,
+      );
     }
   }
 
-  private fireHeroProjectile(target: Enemy) {
-    const projectile = this.add.rectangle(
-      this.hero.x, this.hero.y - 7, 4, 15, 0xf0dd9f,
-    ).setRotation(-0.4).setDepth(12);
+  // Ataque de um herói (ou companheiro): efeito + dano (+ golpe em arco do Guardião).
+  private strike(
+    kind: HeroKind,
+    x: number,
+    y: number,
+    target: Enemy,
+    dmg: number,
+    visual: Phaser.GameObjects.Container,
+    isHero: boolean,
+  ) {
+    const tech = this.finalChoice === 'tech';
+    const fused = isHero && this.fused;
+    const melee = kind === 'guardiao' && !fused && !tech;
+    const fxKind: HeroKind | 'fused' = fused
+      ? 'fused'
+      : tech && kind === 'guardiao' ? 'arcanista' : kind;
 
-    const glow = this.add.circle(
-      this.hero.x, this.hero.y - 7, 8, GOLD_LIGHT, 0.4,
-    ).setBlendMode(Phaser.BlendModes.ADD).setDepth(11);
+    this.attackFx(fxKind, x, y, target, visual, melee);
+    this.hitTarget(target, dmg, x, y);
+
+    if (!melee) return;
+
+    // A espada acerta também quem está colado no alvo.
+    for (const e of [...this.enemies]) {
+      if (!e.alive || e === target) continue;
+
+      if (
+        Phaser.Math.Distance.Between(e.body.x, e.body.y, target.body.x, target.body.y) <= 62 &&
+        Phaser.Math.Distance.Between(e.body.x, e.body.y, x, y) <= 110
+      ) {
+        this.damageEnemy(e, dmg * 0.5);
+      }
+    }
+  }
+
+  private attackFx(
+    kind: HeroKind | 'fused',
+    x: number,
+    y: number,
+    target: Enemy,
+    visual: Phaser.GameObjects.Container,
+    melee: boolean,
+  ) {
+    const tx = target.body.x;
+    const ty = target.body.y;
+    const ang = Math.atan2(ty - y, tx - x);
+    const fl = tx < x ? -1 : 1;
+
+    visual.setScale(fl, 1);
+
+    SFX.play(
+      melee ? 'slash' : kind === 'patrulheiro' ? 'arrow' : kind === 'fused' ? 'fusedorb' : 'orb',
+    );
+    this.emote(visual, 'angry', 380);
+
+    // Golpe do corpo: a espada gira; os outros dão um tranco de disparo.
+    this.tweens.add({
+      targets: visual,
+      angle: fl * (melee ? 26 : 8),
+      duration: melee ? 90 : 70,
+      yoyo: true,
+    });
+
+    if (melee) {
+      const arc = this.add.graphics().setDepth(12);
+
+      arc.lineStyle(6, 0xfff2c0, 0.95);
+      arc.beginPath();
+      arc.arc(0, 0, 36, -1.0, 1.0, false);
+      arc.strokePath();
+      arc.lineStyle(2, 0xffffff, 1);
+      arc.beginPath();
+      arc.arc(0, 0, 41, -0.9, 0.9, false);
+      arc.strokePath();
+
+      arc.setPosition(x + Math.cos(ang) * 18, y - 6 + Math.sin(ang) * 18);
+      arc.setRotation(ang - 0.7);
+      arc.setScale(0.7);
+
+      this.tweens.add({
+        targets: arc,
+        rotation: ang + 0.7,
+        scale: 1.15,
+        alpha: 0,
+        duration: 190,
+        onComplete: () => arc.destroy(),
+      });
+
+      const spark = this.add.circle(tx, ty - 4, 6, 0xfff2c0, 0.8)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(12);
+
+      this.tweens.add({
+        targets: spark,
+        scale: 2.2,
+        alpha: 0,
+        duration: 200,
+        onComplete: () => spark.destroy(),
+      });
+
+      return;
+    }
+
+    if (kind === 'patrulheiro') {
+      const arrow = this.add.graphics().setDepth(12);
+
+      arrow.lineStyle(2, 0x8b5a2b, 1);
+      arrow.lineBetween(-9, 0, 7, 0);
+      arrow.fillStyle(0xd8e0e8, 1);
+      arrow.fillTriangle(7, -3, 7, 3, 14, 0);
+      arrow.fillStyle(0x7fbf5a, 1);
+      arrow.fillTriangle(-9, 0, -12, -3, -6, 0);
+      arrow.fillTriangle(-9, 0, -12, 3, -6, 0);
+      arrow.setPosition(x, y - 8).setRotation(ang);
+
+      this.tracers.push({
+        x1: x, y1: y - 8, x2: tx, y2: ty - 4, ttl: 150, life: 150, w: 1.5, color: 0xb8ff9a,
+      });
+
+      this.tweens.add({
+        targets: arrow,
+        x: tx,
+        y: ty - 4,
+        duration: 120,
+        onComplete: () => arrow.destroy(),
+      });
+
+      return;
+    }
+
+    const fusedOrb = kind === 'fused';
+    const color = fusedOrb ? 0xffd24a : 0xb070ff;
+    const orb = this.add.circle(x, y - 8, fusedOrb ? 8 : 6, color, 1)
+      .setStrokeStyle(2, 0xffffff, 0.8)
+      .setDepth(12);
+    const glow = this.add.circle(x, y - 8, fusedOrb ? 18 : 13, color, 0.35)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(11);
+
+    this.tracers.push({
+      x1: x, y1: y - 8, x2: tx, y2: ty - 4, ttl: 200, life: 200, w: fusedOrb ? 4 : 3, color,
+    });
 
     this.tweens.add({
-      targets: [projectile, glow],
-      x: target.body.x,
-      y: target.body.y,
-      duration: 130,
+      targets: [orb, glow],
+      x: tx,
+      y: ty - 4,
+      duration: 150,
       onComplete: () => {
-        projectile.destroy();
+        orb.destroy();
         glow.destroy();
+
+        const ring = this.add.circle(tx, ty - 4, 8, color, 0.3)
+          .setStrokeStyle(2, color, 0.9)
+          .setBlendMode(Phaser.BlendModes.ADD)
+          .setDepth(12);
+
+        this.tweens.add({
+          targets: ring,
+          scale: fusedOrb ? 3.2 : 2.4,
+          alpha: 0,
+          duration: 260,
+          onComplete: () => ring.destroy(),
+        });
       },
     });
   }
@@ -5827,6 +7238,11 @@ class GameScene extends BaseScene {
 
       this.heroDamage++;
       this.heroRange += 5;
+
+      if (this.heroKind === 'guardiao' && !this.fused && this.finalChoice !== 'tech') {
+        this.heroRange = Math.min(this.heroRange, 95);
+      }
+
       this.maxMana += 5;
       this.applyHeroHp();
       this.mana = Math.min(this.maxMana, this.mana + 5);
@@ -5873,6 +7289,13 @@ class GameScene extends BaseScene {
 
     const info = this.skillMeta(skill);
 
+    if (skill === 'strike' && !this.ultAllowed()) {
+      this.showMessage(
+        `Ultimate bloqueado: libere por ◆${DIAMOND_COST.ult} na loja de diamantes (painel do herói).`,
+      );
+      return;
+    }
+
     if (skill === 'aura') {
       const names = this.fused
         ? 'todas as torres'
@@ -5905,6 +7328,8 @@ class GameScene extends BaseScene {
       return;
     }
 
+    const manaBefore = this.mana;
+
     switch (skill) {
       case 'explosion':
         this.useExplosion(cost, rank);
@@ -5923,6 +7348,12 @@ class GameScene extends BaseScene {
         break;
       default:
         break;
+    }
+
+    if (this.mana < manaBefore || this.finalChoice === 'tech') {
+      SFX.play((skill === 'strike' ? 'ult' : skill) as SfxName);
+      this.sayHero(skill);
+      this.emote(this.heroVisual, skill === 'repair' ? 'happy' : 'angry', 900);
     }
 
     this.refreshInterface();
@@ -6484,6 +7915,15 @@ class GameScene extends BaseScene {
 
     this.setButtonLabel(this.heroButton, 'LOJA');
 
+    const tag = this.waveTag(nextWave);
+
+    this.setButtonLabel(
+      this.waveButton,
+      nextWave > MAX_WAVES
+        ? 'FIM'
+        : tag ? `ONDA ${nextWave}: ${tag}` : `INICIAR ONDA ${nextWave}  +`,
+    );
+
     this.drawBars();
   }
 
@@ -6565,6 +8005,9 @@ class GameScene extends BaseScene {
     if (elite) parts.push(`ELITE·${elite}`);
     if (boss) parts.push(`CHEFE·${boss}`);
 
+    const tag = this.waveTag(w);
+    if (tag) parts.unshift(tag);
+
     return `PRÓX.${w}: ${parts.join(' ')}`;
   }
 
@@ -6583,6 +8026,14 @@ class GameScene extends BaseScene {
       }
     }
 
+    if (waveId % 5 === 4) {
+      text += ' ONDA IMUNE: imune a fogo e gelo; só o atordoamento da Balista funciona.';
+    }
+
+    if (waveId % 5 === 3) {
+      text += ' ONDA VOADORA: voam direto para a fortaleza! Fogo e gelo falham no ar; a REDE da Balista nv.5 derruba por 4 s.';
+    }
+
     if (elite) text += ` ${elite} ELITE(S).`;
     if (boss) text += ' CHEFÃO!';
 
@@ -6590,7 +8041,7 @@ class GameScene extends BaseScene {
       const t = ENEMY_TYPES[k];
 
       text += `\n${t.name}: GUARDIÃ ${Math.round(t.resist.basic * 100)}%`
-        + ` · BESTEIRA ${Math.round(t.resist.rapid * 100)}%`
+        + ` · BALISTA ${Math.round(t.resist.rapid * 100)}%`
         + ` · ARCANA ${Math.round(t.resist.sniper * 100)}%`;
     }
 
@@ -6705,7 +8156,7 @@ class GameScene extends BaseScene {
   }
 
   // Aura passiva e permanente. Cada herói reforça SÓ o tipo de torre dele
-  // (Guardião→Guardiã, Patrulheiro→Besteira, Arcanista→Arcana). O herói
+  // (Guardião→Guardiã, Patrulheiro→Balista, Arcanista→Arcana). O herói
   // fundido reforça todas, com bônus x1,5. Funciona desde o início e melhora
   // a cada nível de AURA (compartilhado entre os heróis).
   private auraFor(kind: TowerKind): AuraBoost {
@@ -6759,6 +8210,11 @@ class GameScene extends BaseScene {
 
     this.heroDamage = (f ? 12 : st.damage) + (lvl - 1) + eq.weapon * 2;
     this.heroRange = (f ? 160 : st.range) + (lvl - 1) * 5 + eq.weapon * 4;
+
+    // Guardião luta de perto com a espada.
+    if (!f && this.heroKind === 'guardiao') {
+      this.heroRange = Math.min(this.heroRange, 95);
+    }
     this.heroAttackRate = f ? 360 : st.attackRate;
     this.heroSpeed = (f ? 255 : st.speed) + eq.armor * 8;
 
@@ -6848,17 +8304,12 @@ class GameScene extends BaseScene {
 
     const now = this.time.now;
     const offsets = [{ x: -54, y: 24 }, { x: 54, y: 24 }];
-    const shotColor: Record<HeroKind, number> = {
-      guardiao: 0xf0dd9f,
-      patrulheiro: 0xb8ff9a,
-      arcanista: 0xd09fff,
-    };
-
     for (const c of this.companions) {
       const st = HERO_STATS[c.kind];
       const eq = this.equip[c.kind];
       const supreme = this.finalChoice === 'tech';
-      const range = supreme ? 440 : st.range + (this.heroLevel - 1) * 5 + eq.weapon * 4;
+      const rawRange = supreme ? 440 : st.range + (this.heroLevel - 1) * 5 + eq.weapon * 4;
+      const range = c.kind === 'guardiao' && !supreme ? Math.min(rawRange, 95) : rawRange;
       const speed = st.speed + eq.armor * 8;
 
       let target: Enemy | undefined;
@@ -6922,25 +8373,12 @@ class GameScene extends BaseScene {
       if (target && c.cd <= 0 && best <= range) {
         c.cd = supreme ? 140 : st.attackRate;
 
-        const shot = this.add.rectangle(c.x, c.y - 7, 4, 15, shotColor[c.kind])
-          .setRotation(-0.4)
-          .setDepth(12);
-
-        this.tweens.add({
-          targets: shot,
-          x: target.body.x,
-          y: target.body.y,
-          duration: 130,
-          onComplete: () => shot.destroy(),
-        });
-
-        this.hitTarget(
-          target,
+        this.strike(
+          c.kind, c.x, c.y, target,
           supreme
             ? SUPREME_DAMAGE
             : Math.max(1, Math.round((st.damage + (this.heroLevel - 1) + eq.weapon * 2) * 0.8)),
-          c.x,
-          c.y,
+          c.visual, false,
         );
       }
     }
@@ -7195,7 +8633,8 @@ class GameScene extends BaseScene {
   }
 
   private gateWave(level: number): number {
-    return level === 2 ? 30 : level === 3 ? 60 : 91;
+    // Primeira onda que exige o novo mundo (a anterior ainda pode ser repetida).
+    return level === 2 ? 31 : level === 3 ? 61 : 91;
   }
 
   // 2 e 3 = mundos; 4 = mundo supremo (só depois do mundo 3).
@@ -7223,26 +8662,6 @@ class GameScene extends BaseScene {
     else this.openWorldUnlock(level);
   }
 
-  private continueInWorld() {
-    this.skipGateWave = this.wave + 1;
-    this.closeModal();
-    this.showMessage(
-      'Você continua no mundo atual. Os monstros ficam mais rápidos; a pergunta volta na próxima onda.',
-    );
-    this.startWave();
-  }
-
-  // Quanto mais portões ignorados, mais rápidos os monstros.
-  private overdueSpeed(waveId: number): number {
-    let n = 0;
-
-    if (this.worldLevel < 2 && waveId >= 30) n++;
-    if (this.worldLevel < 3 && waveId >= 60) n++;
-    if (this.finalChoice === null && waveId >= 91) n++;
-
-    return Math.pow(1.25, n);
-  }
-
   private openWorldUnlock(level: number) {
     const info = WORLD_INFO[level];
     const nextHero = HERO_ORDER.find(h => !this.unlockedHeroes.includes(h));
@@ -7255,7 +8674,7 @@ class GameScene extends BaseScene {
       `Recompensa: ${heroName} entra na batalha (heróis em campo ao mesmo tempo).\n` +
       'Ele luta sozinho; use os botões à esquerda da fortaleza para escolher qual herói controlar.' +
       (gate
-        ? '\n\nSe continuar no mundo atual, os monstros ficam mais rápidos até você fazer o upgrade. A pergunta volta a cada onda.'
+        ? '\n\nSem o upgrade você só pode repetir a última onda deste mundo. A pergunta volta a cada onda.'
         : '');
 
     this.openModal(info.name, body, [
@@ -7272,7 +8691,7 @@ class GameScene extends BaseScene {
         },
       },
       gate
-        ? { label: 'CONTINUAR NO MUNDO ATUAL', color: '#3a4046', action: () => this.continueInWorld() }
+        ? { label: `REPETIR ONDA ${this.gateWave(level) - 1}`, color: '#3a4046', action: () => this.repeatInWorld() }
         : { label: 'AGORA NÃO', color: '#3a4046', action: () => this.closeModal() },
     ]);
   }
@@ -7329,7 +8748,7 @@ class GameScene extends BaseScene {
     const body =
       `Deseja ascender ao mundo supremo?\n\nVocê tem ${this.coins} moedas.` +
       (gate
-        ? '\n\nSe continuar no mundo atual, os monstros ficam mais rápidos até você ascender. A pergunta volta a cada onda.'
+        ? '\n\nSem ascender você só pode repetir a onda 90. A pergunta volta a cada onda.'
         : '');
 
     this.openModal('O MUNDO SUPREMO', body, [
@@ -7347,7 +8766,7 @@ class GameScene extends BaseScene {
         },
       },
       gate
-        ? { label: 'CONTINUAR NO MUNDO ATUAL', color: '#3a4046', action: () => this.continueInWorld() }
+        ? { label: 'REPETIR ONDA 90', color: '#3a4046', action: () => this.repeatInWorld() }
         : { label: 'AGORA NÃO', color: '#3a4046', action: () => this.closeModal() },
     ]);
   }
@@ -7419,8 +8838,8 @@ class GameScene extends BaseScene {
 
     if (t.kind === 'rapid') {
       return on
-        ? 'PODER NV.5: metralhadora; após 2 s atirando, atordoa o alvo por 1 s.'
-        : 'Nv.5 libera: modo metralhadora.';
+        ? 'PODER NV.5: metralhadora (atordoa 1 s após 2 s atirando) + REDE em área nos voadores a cada 12 s: caem presos por 4 s.'
+        : 'Nv.5 libera: metralhadora e rede contra voadores.';
     }
 
     return on
@@ -7696,7 +9115,7 @@ class GameScene extends BaseScene {
   // ---------- painel do herói, armamento e PIX ----------
 
   private gearCost(slot: Gear, level: number): number {
-    return GEAR_BASE_COST[slot] * (level + 1);
+    return Math.round(GEAR_BASE_COST[slot] * (level + 1) * this.priceMult());
   }
 
   private refreshHeroLook() {
@@ -7726,6 +9145,7 @@ class GameScene extends BaseScene {
     }
 
     this.coins -= cost;
+    SFX.play('upgrade');
     eq[slot]++;
     this.applyHeroStats();
     this.refreshHeroLook();
@@ -7878,12 +9298,20 @@ class GameScene extends BaseScene {
     label(40, 636, `MOEDAS: ${this.coins}`, 16, '#ffe08a', true);
 
     const pix = this.makeButton(
-      40, 664, 'COMPRAR MOEDAS COM PIX', '#1f7a5a',
-      () => this.openPixShop(), 13, 520, 40,
+      40, 664, 'MOEDAS · PIX', '#1f7a5a',
+      () => this.openPixShop(), 13, 255, 40,
     );
 
     pix.setDepth(53);
     keep(pix);
+
+    const dia = this.makeButton(
+      305, 664, `DIAMANTES · ◆${this.diamonds}`, '#3a5aa0',
+      () => this.openDiamondShop(), 13, 255, 40,
+    );
+
+    dia.setDepth(53);
+    keep(dia);
 
     const skills = this.makeButton(
       40, 718, 'HABILIDADES', '#5e4482',
@@ -8626,9 +10054,324 @@ class GameScene extends BaseScene {
     }
   }
 
+  // ---------- diamantes (só por PIX) ----------
+
+  private saveDia() {
+    saveDiamonds({ diamonds: this.diamonds, lv6: this.lv6, ult: this.ultUnlocked });
+  }
+
+  private ultAllowed(): boolean {
+    return this.ultUnlocked || this.finalChoice === 'tech';
+  }
+
+  private petCount(kind: AllyKind): number {
+    return this.allies.filter(a => a.kind === kind).length;
+  }
+
+  private diaModal(
+    x: number, y: number, w: number, h: number, title: string,
+  ) {
+    this.closeModal();
+    this.modalOpen = true;
+
+    const keep = <T extends Phaser.GameObjects.GameObject>(o: T): T => {
+      this.modalObjects.push(o);
+      return o;
+    };
+
+    keep(
+      this.add.rectangle(300, 500, WIDTH, HEIGHT, 0x000000, 0.78)
+        .setDepth(50)
+        .setInteractive(),
+    );
+
+    const panel = keep(this.add.graphics().setDepth(51));
+    this.drawPanelFrame(panel, x, y, w, h, 10);
+
+    keep(
+      this.add.text(300, y + 32, title, {
+        fontFamily: 'Georgia, serif',
+        fontSize: '19px',
+        color: '#9fe8ff',
+        fontStyle: 'bold',
+        stroke: '#000000',
+        strokeThickness: 3,
+      }).setOrigin(0.5).setDepth(52),
+    );
+
+    const text = (tx: number, ty: number, str: string, size: number, color: string, wrap = 480) =>
+      keep(
+        this.add.text(tx, ty, str, {
+          fontFamily: 'Arial, sans-serif',
+          fontSize: `${size}px`,
+          color,
+          wordWrap: { width: wrap },
+          lineSpacing: 3,
+        }).setDepth(52),
+      );
+
+    const button = (
+      bx: number, by: number, label: string, color: string,
+      action: () => void, bw: number, bh: number, size = 11,
+    ) => {
+      const b = this.makeButton(bx, by, label, color, action, size, bw, bh);
+      b.setDepth(53);
+      keep(b);
+      return b;
+    };
+
+    return { text, button };
+  }
+
+  private openDiamondShop(note = '') {
+    const { text, button } = this.diaModal(
+      40, 150, 520, 720, `LOJA DE DIAMANTES  ◆ ${this.diamonds}`,
+    );
+
+    text(60, 196, note || 'Diamantes só são obtidos por PIX. Os itens abaixo são permanentes (torres e ultimate).', 11, note ? '#9fe3b0' : '#d9d0b7');
+
+    const kinds: TowerKind[] = ['basic', 'rapid', 'sniper'];
+
+    text(60, 246, 'TORRE NÍVEL 6 · empurra os monstros para trás', 12, '#f0d58a');
+
+    kinds.forEach((k, i) => {
+      const owned = this.lv6[k];
+
+      button(
+        60 + i * 164, 270,
+        owned ? `${TOWER_STATS[k].name} · LIBERADA` : `${TOWER_STATS[k].name} · ◆${DIAMOND_COST.tower}`,
+        owned ? '#2b302b' : '#3a5aa0',
+        () => this.buyTowerLv6(k), 156, 36,
+      );
+    });
+
+    text(60, 330, 'PETS · cada compra traz 1 aliado (máx. 2 de cada tipo)', 12, '#f0d58a');
+
+    const pets: [AllyKind, string][] = [['dog', 'CÃO'], ['human', 'SOLDADO'], ['drone', 'DRONE']];
+
+    pets.forEach(([k, name], i) => {
+      button(
+        60 + i * 164, 354,
+        `${name} ${this.petCount(k)}/2 · ◆${DIAMOND_COST.pet}`,
+        '#3a5aa0',
+        () => this.buyPet(k), 156, 36,
+      );
+    });
+
+    text(60, 414, 'ULTIMATE · a 4ª habilidade de cada herói', 12, '#f0d58a');
+
+    button(
+      60, 438,
+      this.ultUnlocked ? 'ULTIMATE LIBERADO' : `LIBERAR ULTIMATE · ◆${DIAMOND_COST.ult}`,
+      this.ultUnlocked ? '#2b302b' : '#7a3aa0',
+      () => this.buyUlt(), 480, 36,
+    );
+
+    button(
+      60, 500, 'COMPRAR DIAMANTES COM PIX', '#1f7a5a',
+      () => this.openDiamondPix(), 480, 42, 13,
+    );
+
+    text(
+      60, 560,
+      'PACOTES\n' +
+      DIAMOND_PACKS.map(p => `${p.label}  →  ◆${p.diamonds}  ·  ${p.desc}`).join('\n'),
+      11, '#cfe8ff',
+    );
+
+    button(60, 800, 'VOLTAR', '#3a4046', () => this.openHeroPanel(), 480, 40, 12);
+  }
+
+  private buyTowerLv6(k: TowerKind) {
+    if (this.lv6[k]) return this.openDiamondShop('Esta torre já está liberada.');
+
+    if (this.diamonds < DIAMOND_COST.tower) {
+      return this.openDiamondShop('Diamantes insuficientes. Compre um pacote por PIX.');
+    }
+
+    this.diamonds -= DIAMOND_COST.tower;
+    this.lv6[k] = true;
+    this.saveDia();
+    this.openDiamondShop(`Nível 6 liberado para a torre ${TOWER_STATS[k].name}! Melhore uma torre nível 5.`);
+  }
+
+  private buyPet(k: AllyKind) {
+    if (this.finalChoice === 'tech') {
+      return this.openDiamondShop('No mundo supremo os pets não existem.');
+    }
+
+    if (this.petCount(k) >= 2) return this.openDiamondShop('Você já tem 2 pets deste tipo.');
+
+    if (this.diamonds < DIAMOND_COST.pet) {
+      return this.openDiamondShop('Diamantes insuficientes. Compre um pacote por PIX.');
+    }
+
+    this.diamonds -= DIAMOND_COST.pet;
+    this.saveDia();
+    this.spawnAllies(k, 1);
+    this.openDiamondShop('Pet comprado! Ele já está ao seu lado.');
+  }
+
+  private buyUlt() {
+    if (this.ultUnlocked) return this.openDiamondShop('O ultimate já está liberado.');
+
+    if (this.diamonds < DIAMOND_COST.ult) {
+      return this.openDiamondShop('Diamantes insuficientes. Compre um pacote por PIX.');
+    }
+
+    this.diamonds -= DIAMOND_COST.ult;
+    this.ultUnlocked = true;
+    this.saveDia();
+    this.openDiamondShop('Ultimate liberado para todos os heróis!');
+  }
+
+  // ATENÇÃO: sem servidor o jogo não confirma o pagamento PIX. O botão
+  // "JÁ PAGUEI" credita na confiança; para valer de verdade, ligue um
+  // webhook (Mercado Pago, Stripe...) que credite os diamantes.
+  private openDiamondPix() {
+    const { text, button } = this.diaModal(40, 110, 520, 780, 'COMPRAR DIAMANTES · PIX');
+
+    text(60, 156, 'Escolha o pacote: o código PIX Copia e Cola é copiado. Pague no app do banco e depois toque em JÁ PAGUEI.', 12, '#efe6cc');
+
+    const note = text(60, 650, '', 11, '#9fe3b0');
+    let chosen: (typeof DIAMOND_PACKS)[number] | null = null;
+
+    DIAMOND_PACKS.forEach((p, i) => {
+      button(
+        60, 214 + i * 66,
+        `${p.label}  ·  ◆${p.diamonds}  ·  ${p.desc}`,
+        '#1f7a5a',
+        () => {
+          chosen = p;
+
+          const payload = buildPixPayload(p.value);
+          const show = (ok: boolean) => {
+            note.setColor(ok ? '#9fe3b0' : '#ffd9a0');
+            note.setText(
+              `${ok ? 'Código PIX copiado!' : 'Não foi possível copiar automaticamente.'}\n` +
+              `${payload}\n\nPacote escolhido: ${p.label} (◆${p.diamonds}).`,
+            );
+          };
+
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(payload).then(() => show(true), () => show(false));
+          } else {
+            show(false);
+          }
+        },
+        480, 54, 12,
+      );
+    });
+
+    button(
+      60, 560, 'JÁ PAGUEI · CREDITAR DIAMANTES', '#8a6a22',
+      () => {
+        if (!chosen) {
+          note.setColor('#ffd9a0').setText('Escolha um pacote primeiro.');
+          return;
+        }
+
+        this.diamonds += chosen.diamonds;
+        this.saveDia();
+        this.openDiamondShop(`◆${chosen.diamonds} diamantes creditados!`);
+      },
+      480, 44, 12,
+    );
+
+    button(60, 830, 'VOLTAR', '#3a4046', () => this.openDiamondShop(), 480, 40, 12);
+  }
+
+  // ---------- empurrão da torre nível 6 ----------
+
+  private pushBack(e: Enemy, dist: number) {
+    let left = dist;
+
+    while (left > 0) {
+      const prev = e.path[e.segment];
+
+      if (!prev) break;
+
+      const dx = prev.x - e.body.x;
+      const dy = prev.y - e.body.y;
+      const d = Math.hypot(dx, dy);
+
+      if (d > left) {
+        e.body.x += dx / d * left;
+        e.body.y += dy / d * left;
+        break;
+      }
+
+      e.body.setPosition(prev.x, prev.y);
+      left -= d;
+
+      if (e.segment === 0) break;
+
+      e.segment--;
+    }
+  }
+
+  private pushWave(main: Enemy) {
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+
+      if (
+        Phaser.Math.Distance.Between(e.body.x, e.body.y, main.body.x, main.body.y) <= 46
+      ) {
+        this.pushBack(e, e === main ? 22 : 14);
+      }
+    }
+
+    const ring = this.add.circle(main.body.x, main.body.y, 10, 0xffffff, 0.3)
+      .setStrokeStyle(2, 0xfff0a0, 0.9)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(13);
+
+    this.tweens.add({
+      targets: ring,
+      scale: 4,
+      alpha: 0,
+      duration: 260,
+      onComplete: () => ring.destroy(),
+    });
+  }
+
+  private addWings(v: Phaser.GameObjects.Container, family: EnemyFamily) {
+    const col = family === 'robot' ? 0x8fe8ff : family === 'soldier' ? 0xf4f0e0 : 0x4a3a2a;
+
+    for (const sgn of [-1, 1]) {
+      const wing = this.add.triangle(
+        sgn * 9, -8, 0, 0, sgn * 24, -16, sgn * 20, 8, col, 0.92,
+      ).setStrokeStyle(1, 0x000000, 0.6);
+
+      v.add(wing);
+
+      this.tweens.add({
+        targets: wing, scaleY: 0.4, duration: 130, yoyo: true, repeat: -1,
+      });
+    }
+  }
+
+  private priceMult(): number {
+    return 1 + this.wave * 0.06;
+  }
+
+  private towerPrice(kind: TowerKind): number {
+    return Math.round(TOWER_STATS[kind].cost * this.priceMult());
+  }
+
+  private repeatInWorld() {
+    this.repeatGate = true;
+    this.closeModal();
+    this.startWave();
+  }
+
   // ---------- aliados ----------
 
   private onHeroLevel(level: number) {
+    SFX.play('levelup');
+    this.sayHero('level');
+    this.emote(this.heroVisual, 'happy', 1200);
+
     if (level === 6) {
       this.spawnAllies('dog');
       this.showMessage('Nível 6! Dois cães aliados foram invocados.');
@@ -8641,10 +10384,13 @@ class GameScene extends BaseScene {
     }
   }
 
-  private spawnAllies(kind: AllyKind) {
+  private spawnAllies(kind: AllyKind, only?: number) {
     if (this.finalChoice === 'tech') return;
 
-    for (let i = 0; i < 2; i++) {
+    const have = this.allies.filter(a => a.kind === kind).length;
+    const limit = only === undefined ? 2 : Math.min(2, have + only);
+
+    for (let i = have; i < limit; i++) {
       const visual = this.createAllyVisual(kind)
         .setDepth(kind === 'drone' ? 9 : 6);
 
@@ -8951,8 +10697,9 @@ class GameScene extends BaseScene {
   // ==================================================
 
   update(_time: number, delta: number) {
-    if (this.gameOver) return;
+    if (this.gameOver || this.menuOpen) return;
 
+    SFX.ambient(this.finalChoice === 'tech' ? 'sky' : this.worldTheme());
     this.supremeTick();
     this.moveHero(delta);
     this.regenerateMana(delta);
@@ -8969,6 +10716,7 @@ class GameScene extends BaseScene {
     this.updateHeroCombat(delta);
     this.checkCompletedWaves();
     this.drawSelectedRange();
+    this.drawHeroSelect();
     this.refreshInterface();
   }
 
@@ -9011,6 +10759,7 @@ class GameScene extends BaseScene {
   }
 
   private endGame() {
+    SFX.play('defeat');
     this.showMessage('FIM DE JOGO!');
 
     this.showEndPanel(
@@ -9021,6 +10770,7 @@ class GameScene extends BaseScene {
   }
 
   private victory() {
+    SFX.play('victory');
     if (this.finalChoice === 'tech' && this.techSnap) {
       this.openModal(
         'VITÓRIA NO MUNDO TECNOLÓGICO',
@@ -9039,11 +10789,7 @@ class GameScene extends BaseScene {
             color: '#3a4046',
             action: () => {
               this.closeModal();
-              this.showEndPanel(
-                'VITÓRIA',
-                '#f0d58a',
-                'Você defendeu a fortaleza até a onda 100!\nA campanha foi concluída.',
-              );
+              this.playEnding();
             },
           },
         ],
@@ -9052,11 +10798,592 @@ class GameScene extends BaseScene {
       return;
     }
 
-    this.showEndPanel(
-      'VITÓRIA',
-      '#f0d58a',
-      'Você defendeu a fortaleza até a onda 100!\nA campanha foi concluída.',
-    );
+    this.playEnding();
+  }
+
+  // Final do jogo: pequena história animada + créditos.
+  private playEnding() {
+    this.gameOver = true;
+    this.cameras.main.fadeOut(900, 0, 0, 0);
+
+    this.time.delayedCall(950, () => {
+      this.scene.start('EndingScene', { hero: this.heroKind });
+    });
+  }
+}
+
+// ==================================================
+// FINAL: HISTÓRIA ANIMADA (~10 s) + AGRADECIMENTOS
+// ==================================================
+
+class EndingScene extends BaseScene {
+  private hero: HeroKind = 'guardiao';
+  private done = false;
+
+  constructor() {
+    super('EndingScene');
+  }
+
+  init(data: { hero?: HeroKind }) {
+    this.hero = data?.hero ?? 'guardiao';
+    this.done = false;
+    this.gameOver = false;
+  }
+
+  private leave() {
+    if (this.done) return;
+
+    this.done = true;
+    this.cameras.main.fadeOut(500, 0, 0, 0);
+    this.time.delayedCall(520, () => this.scene.start('TitleScene'));
+  }
+
+  private say(text: string, at: number, hold: number) {
+    const t = this.add.text(300, 230, text, {
+      fontFamily: 'Georgia, serif',
+      fontSize: '26px',
+      color: '#fff3cc',
+      align: 'center',
+      wordWrap: { width: 480 },
+      stroke: '#000000',
+      strokeThickness: 5,
+    }).setOrigin(0.5).setDepth(10).setAlpha(0);
+
+    this.tweens.add({ targets: t, alpha: 1, duration: 500, delay: at });
+    this.tweens.add({ targets: t, alpha: 0, duration: 500, delay: at + 500 + hold });
+  }
+
+  create() {
+    SFX.ambient('sky');
+    this.cameras.main.setBackgroundColor('#02030a');
+    this.cameras.main.fadeIn(700, 0, 0, 0);
+
+    // ---------- cenário ----------
+    const sky = this.add.graphics().setDepth(0);
+
+    this.fillVGradient(sky, 0, 0, WIDTH, 720, 0x04051a, 0x1a1440, 1, 8);
+
+    const stars = this.add.graphics().setDepth(0.5);
+
+    for (let i = 0; i < 80; i++) {
+      stars.fillStyle(0xffffff, 0.4 + (i % 4) * 0.15);
+      stars.fillCircle((i * 137 + 29) % WIDTH, (i * 61 + 13) % 560, 0.7 + (i % 3) * 0.5);
+    }
+
+    const dawn = this.add.graphics().setDepth(1).setAlpha(0);
+
+    this.fillVGradient(dawn, 0, 0, WIDTH, 720, 0x3a2a6a, 0xffb36a, 1, 8);
+
+    const sun = this.add.circle(300, 780, 80, 0xffe08a).setDepth(2);
+    const sunGlow = this.add.circle(300, 780, 140, 0xffd070, 0.25)
+      .setBlendMode(Phaser.BlendModes.ADD).setDepth(2);
+
+    const ground = this.add.graphics().setDepth(3);
+
+    this.fillVGradient(ground, 0, 700, WIDTH, 300, 0x1a1a22, 0x050607, 1, 6);
+
+    // fortaleza ao longe
+    const fort = this.add.graphics().setDepth(4);
+
+    fort.fillStyle(0x0b0b12, 1);
+    fort.fillRect(210, 640, 180, 62);
+
+    for (let i = 0; i < 6; i++) fort.fillRect(210 + i * 32, 628, 18, 14);
+
+    fort.fillRect(190, 600, 40, 102);
+    fort.fillRect(370, 600, 40, 102);
+    fort.fillTriangle(188, 600, 232, 600, 210, 570);
+    fort.fillTriangle(368, 600, 412, 600, 390, 570);
+
+    // olhos dos monstros na escuridão, que somem com o amanhecer
+    for (let i = 0; i < 14; i++) {
+      const ex = 30 + ((i * 97) % 540);
+      const ey = 690 + ((i * 31) % 40);
+
+      const eyes = this.add.circle(ex, ey, 2.4, 0xff3a2a, 0.9).setDepth(4);
+      const eyes2 = this.add.circle(ex + 8, ey, 2.4, 0xff3a2a, 0.9).setDepth(4);
+
+      this.tweens.add({
+        targets: [eyes, eyes2],
+        alpha: 0,
+        duration: 900,
+        delay: 4200 + i * 80,
+      });
+    }
+
+    // ---------- herói ----------
+    const hero = this.createHeroVisual(this.hero, 300, 820).setDepth(5).setScale(3.2);
+
+    this.setFace(hero, 'sad');
+    hero.setAngle(0);
+
+    this.tweens.add({
+      targets: hero,
+      y: 812,
+      duration: 1400,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    // ---------- história (~10 s) ----------
+    this.say('Cem ondas. Cem tempestades.', 700, 1700);
+    this.say('A noite foi longa…\ne a fortaleza quase caiu.', 3100, 1900);
+
+    this.time.delayedCall(5400, () => {
+      SFX.play('victory');
+      this.setFace(hero, 'happy');
+
+      this.tweens.add({ targets: dawn, alpha: 1, duration: 3500 });
+      this.tweens.add({ targets: stars, alpha: 0, duration: 2500 });
+      this.tweens.add({ targets: [sun, sunGlow], y: 500, duration: 3800, ease: 'Sine.easeOut' });
+    });
+
+    this.say('Mas você nunca desistiu.', 5600, 1900);
+    this.say('E o amanhecer pertence\na quem resiste.', 8300, 1900);
+
+    // ---------- créditos ----------
+    const shade = this.add.rectangle(300, 500, WIDTH, HEIGHT, 0x000000, 0)
+      .setDepth(8);
+
+    this.time.delayedCall(11000, () => {
+      this.tweens.add({ targets: shade, fillAlpha: 0.78, duration: 1200 });
+      this.tweens.add({ targets: hero, alpha: 0.5, duration: 1200 });
+    });
+
+    const lines: Array<[string, number, string]> = [
+      ['TOWERCRAFT', 40, '#f0d58a'],
+      ['', 20, '#ffffff'],
+      ['OBRIGADO POR JOGAR!', 24, '#fff3cc'],
+      ['', 20, '#ffffff'],
+      ['Um jogo da', 16, '#b8b8c0'],
+      ['ASSAHI GAMES STUDIO', 26, '#f0d58a'],
+      ['', 20, '#ffffff'],
+      ['Feito com Phaser 3 e TypeScript', 16, '#b8b8c0'],
+      ['Sons e músicas sintetizados em tempo real', 16, '#b8b8c0'],
+      ['', 20, '#ffffff'],
+      ['AGRADECIMENTOS', 22, '#f0d58a'],
+      ['A você, comandante,', 18, '#fff3cc'],
+      ['que defendeu a fortaleza até o fim.', 18, '#fff3cc'],
+      ['', 12, '#ffffff'],
+      ['À família e aos amigos que testaram,', 18, '#fff3cc'],
+      ['sugeriram e acreditaram no projeto.', 18, '#fff3cc'],
+      ['', 12, '#ffffff'],
+      ['A todos que não desistem', 18, '#fff3cc'],
+      ['antes do amanhecer.', 18, '#fff3cc'],
+    ];
+
+    const box = this.add.container(0, 1040).setDepth(12);
+    let yy = 0;
+
+    for (const [text, size, color] of lines) {
+      if (text) {
+        box.add(
+          this.add.text(300, yy, text, {
+            fontFamily: 'Georgia, serif',
+            fontSize: `${size}px`,
+            color,
+            fontStyle: size >= 22 ? 'bold' : 'normal',
+            align: 'center',
+            stroke: '#000000',
+            strokeThickness: 3,
+          }).setOrigin(0.5),
+        );
+      }
+
+      yy += size + 22;
+    }
+
+    this.tweens.add({
+      targets: box,
+      y: -yy + 80,
+      duration: 17000,
+      delay: 11500,
+      ease: 'Linear',
+    });
+
+    this.time.delayedCall(29000, () => {
+      const fim = this.add.text(300, 440, 'FIM', {
+        fontFamily: 'Georgia, serif',
+        fontSize: '64px',
+        color: '#f0d58a',
+        fontStyle: 'bold',
+        stroke: '#000000',
+        strokeThickness: 6,
+      }).setOrigin(0.5).setDepth(14).setAlpha(0);
+
+      this.tweens.add({ targets: fim, alpha: 1, duration: 1000 });
+
+      this.time.delayedCall(1200, () => {
+        this.makeButton(
+          190, 560, 'VOLTAR AO INÍCIO', '#8a3a2c',
+          () => this.leave(), 16, 220, 50,
+        ).setDepth(30);
+      });
+    });
+
+    this.time.delayedCall(1200, () => {
+      this.makeButton(
+        508, 10, 'PULAR', '#3a4a5a',
+        () => this.leave(), 11, 82, 26,
+      ).setDepth(30);
+    });
+  }
+}
+
+// ==================================================
+// ABERTURA: TEASER DO ESTÚDIO (3 s) + VÍDEO (10 s)
+// ==================================================
+
+class IntroScene extends BaseScene {
+  private finished = false;
+
+  constructor() {
+    super('IntroScene');
+  }
+
+  init() {
+    this.finished = false;
+    this.gameOver = false;
+  }
+
+  private go() {
+    if (this.finished) return;
+
+    this.finished = true;
+    this.cameras.main.fadeOut(350, 0, 0, 0);
+    this.time.delayedCall(380, () => this.scene.start('TitleScene'));
+  }
+
+  create() {
+    this.cameras.main.setBackgroundColor('#000000');
+    this.cameras.main.fadeIn(250, 0, 0, 0);
+
+    this.input.keyboard?.once('keydown-ENTER', () => this.go());
+    this.input.keyboard?.once('keydown-SPACE', () => this.go());
+    this.input.keyboard?.once('keydown-ESC', () => this.go());
+
+    const hint = this.add.text(300, 968, 'toque para pular', {
+      fontFamily: 'Arial, sans-serif', fontSize: '11px', color: '#9a9a9a',
+    }).setOrigin(0.5).setDepth(80).setAlpha(0);
+
+    this.time.delayedCall(1200, () => {
+      if (this.finished) return;
+
+      this.tweens.add({ targets: hint, alpha: 0.7, duration: 500 });
+      this.input.once('pointerdown', () => this.go());
+    });
+
+    this.teaser();
+    this.time.delayedCall(3000, () => this.film());
+  }
+
+  // ---------- teaser do estúdio: 3 segundos ----------
+  private teaser() {
+    const box = this.add.container(0, 0).setDepth(10);
+
+    const glow = this.add.circle(300, 430, 130, 0xffd36a, 0.14)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    const ring1 = this.add.circle(300, 430, 70, 0x000000, 0).setStrokeStyle(4, 0xe0b84a, 1);
+    const ring2 = this.add.circle(300, 430, 56, 0x000000, 0).setStrokeStyle(2, 0xfff0a0, 0.8);
+    const gem = this.add.rectangle(300, 430, 52, 52, 0xe0b84a, 0.25)
+      .setRotation(Math.PI / 4)
+      .setStrokeStyle(3, 0xffe08a, 1);
+    const letter = this.add.text(300, 430, 'A', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '64px',
+      color: '#ffe9a8',
+      fontStyle: 'bold',
+      stroke: '#5a3a08',
+      strokeThickness: 5,
+    }).setOrigin(0.5);
+
+    const name = this.add.text(300, 545, 'A S S A H I', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '40px',
+      color: '#f0d58a',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 5,
+    }).setOrigin(0.5).setAlpha(0);
+
+    const sub = this.add.text(300, 595, 'GAMES  STUDIO', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '22px',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setAlpha(0);
+
+    box.add([glow, ring1, ring2, gem, letter, name, sub]);
+
+    box.setAlpha(0);
+    ring1.setScale(0.2);
+    ring2.setScale(0.2);
+    gem.setScale(0.2);
+    letter.setScale(0.2);
+
+    this.tweens.add({ targets: box, alpha: 1, duration: 300 });
+    this.tweens.add({
+      targets: [ring1, ring2, gem, letter], scale: 1, duration: 700, ease: 'Back.easeOut',
+    });
+    this.tweens.add({ targets: gem, rotation: gem.rotation + Math.PI, duration: 1600 });
+    this.tweens.add({ targets: name, alpha: 1, y: 540, duration: 500, delay: 700 });
+    this.tweens.add({ targets: sub, alpha: 1, duration: 500, delay: 950 });
+
+    for (let i = 0; i < 26; i++) {
+      const a = (i / 26) * Math.PI * 2;
+      const spark = this.add.circle(300, 430, 2.4, 0xfff0a0, 0.9)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(11);
+
+      this.tweens.add({
+        targets: spark,
+        x: 300 + Math.cos(a) * Phaser.Math.Between(110, 220),
+        y: 430 + Math.sin(a) * Phaser.Math.Between(110, 220),
+        alpha: 0,
+        duration: 900,
+        delay: 500,
+        onComplete: () => spark.destroy(),
+      });
+    }
+
+    const sweep = this.add.rectangle(-80, 560, 50, 150, 0xffffff, 0.45)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setRotation(0.35)
+      .setDepth(12);
+
+    this.tweens.add({
+      targets: sweep, x: 700, duration: 800, delay: 1500,
+      onComplete: () => sweep.destroy(),
+    });
+
+    this.tweens.add({ targets: box, alpha: 0, duration: 450, delay: 2500 });
+  }
+
+  // ---------- vídeo de 10 segundos ----------
+  private film() {
+    if (this.finished) return;
+
+    const W = WIDTH;
+    const H = HEIGHT;
+
+    const sky = this.add.graphics().setDepth(1).setAlpha(0);
+    this.fillVGradient(sky, 0, 0, W, H, 0x050a1e, 0x2a1c4a, 1, 20);
+    this.tweens.add({ targets: sky, alpha: 1, duration: 450 });
+
+    for (let i = 0; i < 70; i++) {
+      const star = this.add.circle(
+        (i * 173 + 31) % W, (i * 89 + 17) % 560, 1.2, 0xffffff, 0.8,
+      ).setDepth(2);
+
+      this.tweens.add({
+        targets: star, alpha: 0.2, duration: Phaser.Math.Between(500, 1400),
+        yoyo: true, repeat: -1,
+      });
+    }
+
+    const moonGlow = this.add.circle(460, 230, 90, 0xf6f0d8, 0.12)
+      .setBlendMode(Phaser.BlendModes.ADD).setDepth(2);
+    const moon = this.add.circle(460, 230, 44, 0xf6f0d8).setDepth(2);
+
+    // vila
+    const ground = this.add.graphics().setDepth(3);
+    ground.fillStyle(0x06080d, 1);
+    ground.fillRect(0, 770, W, 230);
+    ground.fillEllipse(120, 780, 360, 90);
+    ground.fillEllipse(480, 790, 420, 100);
+
+    const windows: Phaser.GameObjects.Rectangle[] = [];
+
+    for (let i = 0; i < 7; i++) {
+      const hx = 250 + i * 48;
+      const hh = 40 + (i % 3) * 14;
+
+      ground.fillStyle(0x080b12, 1);
+      ground.fillRect(hx, 770 - hh, 34, hh);
+      ground.fillTriangle(hx - 4, 770 - hh, hx + 38, 770 - hh, hx + 17, 770 - hh - 20);
+
+      windows.push(
+        this.add.rectangle(hx + 17, 770 - hh / 2, 8, 9, 0xffd27a).setDepth(4),
+      );
+    }
+
+    // portal e rachadura no céu
+    const portal = this.add.container(300, 320).setDepth(5).setAlpha(0).setScale(0.1);
+    const crack = this.add.graphics();
+
+    crack.lineStyle(5, 0xb8f0ff, 1);
+
+    let px = 0;
+    let py = -190;
+
+    for (let i = 0; i < 9; i++) {
+      const nx = (Math.random() - 0.5) * 60;
+      const ny = py + 44;
+
+      crack.lineBetween(px, py, nx, ny);
+      px = nx;
+      py = ny;
+    }
+
+    const halo = this.add.ellipse(0, 0, 220, 330, 0x7a4aff, 0.28)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setStrokeStyle(4, 0x9fe8ff, 0.9);
+    const core = this.add.ellipse(0, 0, 120, 230, 0xff3a5a, 0.35)
+      .setBlendMode(Phaser.BlendModes.ADD);
+
+    portal.add([halo, core, crack]);
+    this.tweens.add({ targets: halo, scaleX: 1.12, duration: 500, yoyo: true, repeat: -1 });
+
+    // olhos vermelhos na escuridão
+    const eyes = this.add.container(0, 0).setDepth(6).setAlpha(0);
+
+    for (let i = 0; i < 16; i++) {
+      const ex = 40 + ((i * 97) % 520);
+      const ey = 600 + ((i * 53) % 150);
+
+      eyes.add([
+        this.add.circle(ex, ey, 3, 0xff3030).setBlendMode(Phaser.BlendModes.ADD),
+        this.add.circle(ex + 11, ey, 3, 0xff3030).setBlendMode(Phaser.BlendModes.ADD),
+      ]);
+    }
+
+    // herói e torres
+    const hero = this.add.container(120, 700).setDepth(7).setAlpha(0);
+    const heroGlow = this.add.circle(10, -30, 70, 0xffd36a, 0.0)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    const cape = this.add.triangle(-8, -2, 0, -22, -22, 34, 8, 34, 0x0a0c12);
+    const body = this.add.rectangle(0, -2, 16, 38, 0x0a0c12);
+    const head = this.add.circle(0, -30, 9, 0x0a0c12);
+    const sword = this.add.rectangle(18, -48, 4, 62, 0xfff0b0).setRotation(0.25);
+
+    hero.add([heroGlow, cape, body, head, sword]);
+
+    const towers: Phaser.GameObjects.Container[] = [];
+
+    [300, 400, 500].forEach((tx, i) => {
+      const t = this.add.container(tx, 840).setDepth(7).setAlpha(0);
+
+      t.add([
+        this.add.rectangle(0, -26, 28, 52, 0x0a0c12),
+        this.add.triangle(0, -64, -20, 12, 20, 12, 0, -22, 0x0a0c12),
+        this.add.circle(0, -40, 4, 0xffd36a).setBlendMode(Phaser.BlendModes.ADD),
+      ]);
+      towers.push(t);
+      void i;
+    });
+
+    // olho gigante
+    const eye = this.add.container(300, 300).setDepth(8).setAlpha(0).setScale(1, 0.05);
+
+    eye.add([
+      this.add.ellipse(0, 0, 420, 190, 0x14060a, 0.95).setStrokeStyle(5, 0xff3030, 1),
+      this.add.circle(0, 0, 52, 0xff2a2a, 0.95).setBlendMode(Phaser.BlendModes.ADD),
+      this.add.ellipse(0, 0, 14, 96, 0x000000, 1),
+    ]);
+
+    // faixas de cinema
+    this.add.rectangle(300, 40, W, 90, 0x000000).setDepth(50);
+    this.add.rectangle(300, 960, W, 90, 0x000000).setDepth(50);
+
+    const caption = (text: string, at: number, dur: number) => {
+      const t = this.add.text(300, 868, text, {
+        fontFamily: 'Georgia, serif',
+        fontSize: '20px',
+        fontStyle: 'italic',
+        color: '#fff6dc',
+        align: 'center',
+        wordWrap: { width: 520 },
+        stroke: '#000000',
+        strokeThickness: 4,
+      }).setOrigin(0.5).setDepth(60).setAlpha(0);
+
+      this.time.delayedCall(at, () => {
+        if (this.finished) return;
+        this.tweens.add({ targets: t, alpha: 1, duration: 300 });
+        this.tweens.add({ targets: t, alpha: 0, duration: 300, delay: dur - 300 });
+      });
+    };
+
+    // ----- linha do tempo (10 s) -----
+    caption('Há muito tempo, o mundo vivia em paz...', 200, 1800);
+
+    this.time.delayedCall(2000, () => {
+      if (this.finished) return;
+
+      caption('Até que o céu se partiu.', 0, 2100);
+      this.cameras.main.shake(500, 0.008);
+      this.tweens.add({
+        targets: portal, alpha: 1, scale: 1.1, duration: 900, ease: 'Back.easeOut',
+      });
+      this.tweens.add({ targets: eyes, alpha: 1, duration: 900, delay: 500 });
+    });
+
+    this.time.delayedCall(4200, () => {
+      if (this.finished) return;
+
+      caption('E algo despertou do outro lado...', 0, 2100);
+      this.cameras.main.flash(250, 255, 60, 90);
+
+      for (const w of windows) {
+        this.tweens.add({ targets: w, alpha: 0, duration: 400, delay: Phaser.Math.Between(0, 1200) });
+      }
+
+      for (let i = 0; i < 12; i++) {
+        const m = this.add.container(-60, 700 + (i % 4) * 22).setDepth(9);
+
+        m.add([
+          this.add.ellipse(0, 0, 40 + (i % 3) * 8, 26, 0x05060a),
+          this.add.circle(8, -3, 2.4, 0xff3030).setBlendMode(Phaser.BlendModes.ADD),
+          this.add.circle(15, -3, 2.4, 0xff3030).setBlendMode(Phaser.BlendModes.ADD),
+        ]);
+
+        this.tweens.add({
+          targets: m,
+          x: W + 80,
+          duration: 1900,
+          delay: i * 140,
+          onComplete: () => m.destroy(),
+        });
+      }
+    });
+
+    this.time.delayedCall(6400, () => {
+      if (this.finished) return;
+
+      caption('Só um herói pode resistir.', 0, 2100);
+      this.tweens.add({ targets: hero, alpha: 1, duration: 500 });
+      heroGlow.setFillStyle(0xffd36a, 0.45);
+      this.tweens.add({ targets: heroGlow, scale: 1.4, duration: 700, yoyo: true, repeat: -1 });
+      this.tweens.add({ targets: sword, rotation: -0.2, duration: 600, ease: 'Back.easeOut' });
+      this.tweens.add({ targets: eyes, alpha: 0.25, duration: 600 });
+
+      towers.forEach((t, i) => {
+        t.y += 70;
+        this.tweens.add({
+          targets: t, alpha: 1, y: t.y - 70, duration: 600, delay: 300 + i * 220,
+          ease: 'Back.easeOut',
+        });
+      });
+    });
+
+    this.time.delayedCall(8600, () => {
+      if (this.finished) return;
+
+      caption('Mas quem observa de lá... ainda não se mostrou.', 0, 1400);
+      this.cameras.main.shake(900, 0.01);
+      this.tweens.add({ targets: sky, alpha: 0.85, duration: 600 });
+      this.tweens.add({ targets: [moon, moonGlow], alpha: 0, duration: 600 });
+      this.tweens.add({ targets: eye, alpha: 1, scaleY: 1, duration: 900, ease: 'Cubic.easeOut' });
+    });
+
+    this.time.delayedCall(9800, () => {
+      if (this.finished) return;
+      this.cameras.main.flash(200, 255, 255, 255);
+    });
+
+    this.time.delayedCall(10000, () => this.go());
   }
 }
 
@@ -9077,6 +11404,7 @@ class TitleScene extends BaseScene {
   }
 
   create() {
+    SFX.ambient('title');
     this.cameras.main.setBackgroundColor('#05060c');
     this.cameras.main.fadeIn(700, 0, 0, 0);
 
@@ -9438,6 +11766,11 @@ class TitleScene extends BaseScene {
 
     go.setDepth(12);
 
+    this.makeButton(
+      200, 522, 'OPÇÕES · SOM', '#3a4a5a',
+      () => this.openOptions(), 14, 200, 44,
+    ).setDepth(12);
+
     const hint = this.add.text(300, 494, 'toque para começar', {
       fontFamily: 'Georgia, serif',
       fontSize: '13px',
@@ -9463,6 +11796,72 @@ class TitleScene extends BaseScene {
     this.input.once('pointerdown', () => this.begin());
     this.input.keyboard?.once('keydown-ENTER', () => this.begin());
     this.input.keyboard?.once('keydown-SPACE', () => this.begin());
+  }
+
+  private optObjs: Phaser.GameObjects.GameObject[] = [];
+
+  private openOptions() {
+    if (this.optObjs.length) return;
+
+    const add = <T extends Phaser.GameObjects.GameObject>(o: T): T => {
+      this.optObjs.push(o);
+      return o;
+    };
+
+    const shade = add(this.add.rectangle(300, 500, WIDTH, HEIGHT, 0x000000, 0.7)
+      .setDepth(40)
+      .setInteractive());
+
+    shade.on('pointerdown', () => undefined);
+
+    const panel = add(this.add.graphics().setDepth(41));
+
+    this.drawPanelFrame(panel, 90, 330, 420, 330);
+
+    add(this.add.text(300, 362, 'OPÇÕES DE SOM', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '22px',
+      color: '#f0d58a',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(42));
+
+    const rows: Array<['music' | 'sfx' | 'voice', string]> = [
+      ['music', 'Música ambiente'],
+      ['sfx', 'Efeitos sonoros'],
+      ['voice', 'Vozes dos heróis'],
+    ];
+
+    rows.forEach(([key, label], i) => {
+      const y = 405 + i * 66;
+      const state = () => `${label}: ${SFX.prefs[key] ? 'LIGADO' : 'DESLIGADO'}`;
+
+      const b = add(this.makeButton(
+        130, y, state(), SFX.prefs[key] ? '#3a6a3a' : '#6a3a3a',
+        () => {
+          SFX.setPref(key, !SFX.prefs[key]);
+          this.closeOptions();
+          this.openOptions();
+        },
+        15, 340, 50,
+      ).setDepth(42));
+
+      b.setDepth(42);
+    });
+
+    add(this.makeButton(
+      210, 604, 'FECHAR', '#8a3a2c',
+      () => this.closeOptions(), 16, 180, 40,
+    ).setDepth(42));
+  }
+
+  private closeOptions() {
+    for (const o of this.optObjs) {
+      if (o.active) this.killVisual(o);
+    }
+
+    this.optObjs = [];
   }
 
   private begin() {
@@ -9503,6 +11902,7 @@ class ShopScene extends BaseScene {
   }
 
   create() {
+    SFX.ambient('title');
     this.cameras.main.setBackgroundColor('#050607');
 
     const bg = this.add.graphics();
@@ -9737,7 +12137,7 @@ new Phaser.Game({
   height: HEIGHT,
   parent: 'app',
   backgroundColor: '#080c09',
-  scene: [TitleScene, ShopScene, GameScene],
+  scene: [IntroScene, TitleScene, ShopScene, GameScene, EndingScene],
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
