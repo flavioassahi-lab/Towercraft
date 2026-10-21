@@ -1707,6 +1707,7 @@ class GameScene extends BaseScene {
   private stashAllies: Ally[] = [];
   private transToken = 0;
   private skipGateWave = 0;
+  private gatePrompt = false;
   private selectorObjs: Phaser.GameObjects.GameObject[] = [];
   private selectorRects: { x: number; y: number; w: number; h: number; kind: HeroKind }[] = [];
   private frameCount = 0;
@@ -1890,7 +1891,10 @@ class GameScene extends BaseScene {
       );
 
       if (picked) {
-        this.swapHero(picked.kind);
+        // Escolhe o herói e já abre as habilidades dele.
+        if (picked.kind !== this.heroKind) this.swapHero(picked.kind);
+
+        this.openHeroMenu();
         return;
       }
 
@@ -4675,8 +4679,9 @@ class GameScene extends BaseScene {
     // (com monstros mais rápidos) até juntar moedas.
     const up = this.nextUpgrade();
 
-    if (up !== null && next === this.gateWave(up) && this.skipGateWave !== next) {
-      this.openUpgrade(up);
+    // A pergunta volta a cada onda, até o jogador conseguir pagar.
+    if (up !== null && next >= this.gateWave(up) && this.skipGateWave !== next) {
+      this.openUpgrade(up, true);
       return;
     }
 
@@ -7206,13 +7211,14 @@ class GameScene extends BaseScene {
     return up !== null && this.wave + 1 >= this.gateWave(up);
   }
 
-  private atGate(level: number): boolean {
-    const next = this.wave + 1;
-
-    return next === this.gateWave(level) && this.skipGateWave !== next;
+  // Verdadeiro quando a pergunta veio do botão de iniciar onda.
+  private atGate(_level: number): boolean {
+    return this.gatePrompt;
   }
 
-  private openUpgrade(level: number) {
+  private openUpgrade(level: number, fromStart = false) {
+    this.gatePrompt = fromStart;
+
     if (level === 4) this.openFinalChoice();
     else this.openWorldUnlock(level);
   }
@@ -7221,7 +7227,7 @@ class GameScene extends BaseScene {
     this.skipGateWave = this.wave + 1;
     this.closeModal();
     this.showMessage(
-      'Você continua no mundo atual. Os monstros ficam mais rápidos até o upgrade (painel do herói).',
+      'Você continua no mundo atual. Os monstros ficam mais rápidos; a pergunta volta na próxima onda.',
     );
     this.startWave();
   }
@@ -7249,7 +7255,7 @@ class GameScene extends BaseScene {
       `Recompensa: ${heroName} entra na batalha (heróis em campo ao mesmo tempo).\n` +
       'Ele luta sozinho; use os botões à esquerda da fortaleza para escolher qual herói controlar.' +
       (gate
-        ? '\n\nSe continuar no mundo atual, os monstros ficam mais rápidos até você fazer o upgrade pelo painel do herói.'
+        ? '\n\nSe continuar no mundo atual, os monstros ficam mais rápidos até você fazer o upgrade. A pergunta volta a cada onda.'
         : '');
 
     this.openModal(info.name, body, [
@@ -7323,7 +7329,7 @@ class GameScene extends BaseScene {
     const body =
       `Deseja ascender ao mundo supremo?\n\nVocê tem ${this.coins} moedas.` +
       (gate
-        ? '\n\nSe continuar no mundo atual, os monstros ficam mais rápidos até você ascender pelo painel do herói.'
+        ? '\n\nSe continuar no mundo atual, os monstros ficam mais rápidos até você ascender. A pergunta volta a cada onda.'
         : '');
 
     this.openModal('O MUNDO SUPREMO', body, [
