@@ -931,9 +931,19 @@ function freshEquip(): Record<HeroKind, Record<Gear, number>> {
 }
 
 // PIX: chave que recebe os pagamentos. O jogo gera o código "Pix Copia e
-// Cola" (BR Code) com o valor do pacote. O jogo não consegue confirmar que o
-// pagamento chegou; para creditar moedas automaticamente seria preciso um
-// servidor ligado ao seu banco ou provedor de pagamento.
+// Cola" (BR Code) com o valor do pacote e um número de pedido único.
+//
+// CONFIRMAÇÃO DO PAGAMENTO (os diamantes NUNCA são creditados só porque a
+// pessoa diz que pagou):
+//  • Com servidor (recomendado): preencha PAYMENT_API com o endereço do
+//    server.js (Mercado Pago). O servidor cria a cobrança, o banco avisa
+//    quando o dinheiro cai e o jogo libera o pacote sozinho.
+//  • Sem servidor: o jogador manda o comprovante com o número do pedido;
+//    você confere no extrato e envia um CÓDIGO DE RESGATE (gerado com a
+//    mesma frase secreta abaixo). Só o código certo libera o pacote.
+const PAYMENT_API = '';
+const REDEEM_SECRET = 'troque-esta-frase-secreta-towercraft';
+const ORDERS_KEY = 'towercraft_orders_v1';
 const PIX_KEY = 'flavioassahi@gmail.com';
 const PIX_NAME = 'FLAVIO ASSAHI';
 const PIX_CITY = 'SAO PAULO';
@@ -949,7 +959,7 @@ const DIAMOND_KEY = 'towercraft_diamonds_v1';
 
 const AURA_RANGE = 190;
 
-const DIAMOND_COST = { tower: 15, pet: 15, ult: 20, cast: 5, life: 5 };
+const DIAMOND_COST = { tower: 15, ally: 15, ult: 20, cast: 5, life: 5 };
 
 // ---------- salvar / continuar ----------
 const SAVE_KEY = 'towercraft_save_v1';
@@ -986,7 +996,8 @@ type SaveData = {
   stock: Record<TowerKind, number>;
   towers: SavedTower[];
   allies: AllyKind[];
-  petCharges: number;
+  allyCharges?: number;
+  petCharges?: number;
   ultCharges: number;
   lifeCharges: number;
   nextRoute: 'left' | 'right';
@@ -1025,13 +1036,97 @@ function clearSave() {
   }
 }
 
-const DIAMOND_PACKS = [
-  { label: 'R$ 15,00', value: 15, diamonds: 15, desc: '1 torre nv.6 OU 1 pet' },
-  { label: 'R$ 20,00', value: 20, diamonds: 20, desc: 'Ultimate dos heróis' },
-  { label: 'R$ 30,00', value: 30, diamonds: 45, desc: '3 torres nv.6 OU 3 pets' },
-  { label: 'R$ 40,00', value: 40, diamonds: 65, desc: '3 torres/3 pets + ultimate' },
-  { label: 'R$ 60,00', value: 60, diamonds: 110, desc: '3 torres + 3 pets + ultimate' },
+// Cada pacote diz exatamente o que entrega. Os itens são liberados
+// AUTOMATICAMENTE assim que o pagamento é confirmado. Se você já tiver algum
+// item do pacote, ele vira diamantes (nada se perde).
+type PackItem = 'lv6all' | 'alliesAll' | 'ult';
+
+type DiamondPack = {
+  id: string;
+  title: string;
+  label: string;
+  value: number;
+  diamonds: number;
+  items: PackItem[];
+  desc: string;
+};
+
+const DIAMOND_PACKS: DiamondPack[] = [
+  {
+    id: 'avulso', title: 'AVULSO', label: 'R$ 15,00', value: 15, diamonds: 15, items: [],
+    desc: '◆15 para gastar onde quiser: 1 torre nv.6 OU 1 aliado.',
+  },
+  {
+    id: 'ultimate', title: 'ULTIMATE', label: 'R$ 20,00', value: 20, diamonds: 0, items: ['ult'],
+    desc: 'Libera na hora o ultimate de todos os heróis.',
+  },
+  {
+    id: 'torres', title: 'TORRES', label: 'R$ 30,00', value: 30, diamonds: 0, items: ['lv6all'],
+    desc: 'Libera na hora o nível 6 da Guardiã, Balista e Arcana.',
+  },
+  {
+    id: 'aliados', title: 'ALIADOS', label: 'R$ 30,00', value: 30, diamonds: 0, items: ['alliesAll'],
+    desc: 'Cão de Guerra + Soldado + Drone entram na hora ao seu lado.',
+  },
+  {
+    id: 'guerreiro', title: 'GUERREIRO', label: 'R$ 40,00', value: 40, diamonds: 0, items: ['lv6all', 'ult'],
+    desc: 'Nível 6 das 3 torres + ultimate, tudo liberado na hora.',
+  },
+  {
+    id: 'completo', title: 'COMPLETO', label: 'R$ 60,00', value: 60, diamonds: 0,
+    items: ['lv6all', 'alliesAll', 'ult'],
+    desc: 'Nível 6 das 3 torres + os 3 aliados + ultimate, tudo na hora.',
+  },
 ];
+
+// ---------- pedidos e códigos de resgate ----------
+type PixOrder = { order: string; pack: string; at: number; remote?: string };
+
+function loadOrders(): PixOrder[] {
+  try {
+    const raw = localStorage.getItem(ORDERS_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter(o => o && o.order && o.pack) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveOrders(list: PixOrder[]) {
+  try {
+    localStorage.setItem(ORDERS_KEY, JSON.stringify(list.slice(-20)));
+  } catch {
+    // ignora
+  }
+}
+
+function newOrderCode(): string {
+  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = 'TC';
+  for (let i = 0; i < 8; i++) out += abc[Math.floor(Math.random() * abc.length)];
+  return out;
+}
+
+// Mesmo cálculo do gerador de códigos (gerador-codigos.html).
+function redeemCode(order: string, pack: string): string {
+  const input = `${REDEEM_SECRET}|${order.toUpperCase()}|${pack}`;
+  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+
+  for (const seed of [0x811c9dc5, 0x01000193 ^ 0x5bd1e995]) {
+    let h = seed >>> 0;
+    for (let i = 0; i < input.length; i++) {
+      h ^= input.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    for (let i = 0; i < 4; i++) {
+      out += abc[h % 32];
+      h = Math.floor(h / 32);
+    }
+  }
+
+  return out;
+}
 
 type DiamondSave = {
   diamonds: number;
@@ -1097,7 +1192,7 @@ function pixCrc(payload: string): string {
   return crc.toString(16).toUpperCase().padStart(4, '0');
 }
 
-function buildPixPayload(amount: number): string {
+function buildPixPayload(amount: number, txid = '***'): string {
   const account =
     pixField('00', 'br.gov.bcb.pix') + pixField('01', PIX_KEY);
 
@@ -1110,7 +1205,7 @@ function buildPixPayload(amount: number): string {
     pixField('58', 'BR') +
     pixField('59', PIX_NAME) +
     pixField('60', PIX_CITY) +
-    pixField('62', pixField('05', '***')) +
+    pixField('62', pixField('05', txid)) +
     '6304';
 
   return base + pixCrc(base);
@@ -1328,6 +1423,29 @@ const ALLY_CFG: Record<AllyKind, {
   dog: { speed: 210, range: 20, rate: 650, leash: 200, color: 0xffd28a, base: 2, perLevel: 0.33 },
   human: { speed: 125, range: 24, rate: 900, leash: 180, color: 0xdfe6e9, base: 5, perLevel: 0.5 },
   drone: { speed: 175, range: 110, rate: 750, leash: 230, color: 0x50e0ff, base: 4, perLevel: 0.33 },
+};
+
+// Ficha de cada aliado (força, velocidade e alcance de 1 a 5).
+const ALLY_INFO: Record<AllyKind, {
+  name: string;
+  role: string;
+  force: number;
+  speed: number;
+  reach: number;
+  traits: string[];
+}> = {
+  dog: {
+    name: 'CÃO DE GUERRA', role: 'Caçador veloz', force: 2, speed: 5, reach: 1,
+    traits: ['Mais rápido do grupo', 'Persegue quem foge', 'Morde 1 alvo de perto'],
+  },
+  human: {
+    name: 'SOLDADO', role: 'Linha de frente', force: 5, speed: 2, reach: 1,
+    traits: ['Golpe mais forte', 'Bom contra chefes', 'Lento, luta de perto'],
+  },
+  drone: {
+    name: 'DRONE', role: 'Suporte aéreo', force: 4, speed: 4, reach: 5,
+    traits: ['Voa e atira de longe', 'Tiro explode em área', 'Ótimo contra grupos'],
+  },
 };
 
 type Ally = {
@@ -2813,6 +2931,7 @@ class GameScene extends BaseScene {
   private repeatGate = false;
   private gatePrompt = false;
   private diamonds = 0;
+  private pixPoll: number | null = null;
   private lv6: Record<TowerKind, boolean> = { basic: false, rapid: false, sniper: false };
   private ultUnlocked = false;
   private selectorObjs: Phaser.GameObjects.GameObject[] = [];
@@ -2878,9 +2997,9 @@ class GameScene extends BaseScene {
   protected contextTitle?: Phaser.GameObjects.Text;
 
   private heroSelected = false;
-  private shopTab: 'armor' | 'pets' = 'armor';
-  private petPreview: AllyKind | null = null;
-  private petCharges = 3;
+  private shopTab: 'armor' | 'allies' = 'armor';
+  private allyPreview: AllyKind | null = null;
+  private allyCharges = 3;
   private lifeCharges = 3;
   private ultCharges = 3;
   private menuOpen = false;
@@ -2962,11 +3081,11 @@ class GameScene extends BaseScene {
     this.diamonds = saved.diamonds;
     this.lv6 = { ...saved.lv6 };
     this.ultUnlocked = saved.ult;
-    this.petCharges = 3;
+    this.allyCharges = 3;
     this.ultCharges = 3;
     this.lifeCharges = 3;
     this.shopTab = 'armor';
-    this.petPreview = null;
+    this.allyPreview = null;
 
     this.coins = data?.coins ?? 200;
     this.stock = data?.stock
@@ -3025,7 +3144,7 @@ class GameScene extends BaseScene {
       this.baseHP = sv.baseHP;
       this.heroDeaths = sv.heroDeaths;
       this.worldLevel = sv.worldLevel;
-      this.petCharges = sv.petCharges;
+      this.allyCharges = sv.allyCharges ?? sv.petCharges ?? 3;
       this.ultCharges = sv.ultCharges;
       this.lifeCharges = sv.lifeCharges;
       this.nextRoute = sv.nextRoute;
@@ -3311,7 +3430,7 @@ class GameScene extends BaseScene {
         totalInvested: t.totalInvested,
       })),
       allies: this.allies.filter(a => !a.until).map(a => a.kind),
-      petCharges: this.petCharges,
+      allyCharges: this.allyCharges,
       ultCharges: this.ultCharges,
       lifeCharges: this.lifeCharges,
       nextRoute: this.nextRoute,
@@ -5758,7 +5877,7 @@ class GameScene extends BaseScene {
 
       const description = this.add.text(
         x, 930,
-        `${skill === 'strike' && !this.ultAllowed() ? 'SEM USOS · ◆' + DIAMOND_COST.cast : info.mana > 0 ? info.mana + ' mana' : 'PASSIVA'}\n${info.description}${skill === 'repair' ? ' Grátis: ' + this.petCharges + '/3.' : skill === 'strike' && !this.ultUnlocked ? ' Grátis: ' + this.ultCharges + '/3.' : ''}`,
+        `${skill === 'strike' && !this.ultAllowed() ? 'SEM USOS · ◆' + DIAMOND_COST.cast : info.mana > 0 ? info.mana + ' mana' : 'PASSIVA'}\n${info.description}${skill === 'repair' ? ' Grátis: ' + this.allyCharges + '/3.' : skill === 'strike' && !this.ultUnlocked ? ' Grátis: ' + this.ultCharges + '/3.' : ''}`,
         {
           fontFamily: 'Arial, sans-serif',
           fontSize: '8px',
@@ -8327,7 +8446,7 @@ class GameScene extends BaseScene {
       return;
     }
 
-    const free = this.petCharges > 0;
+    const free = this.allyCharges > 0;
 
     if (!free && this.diamonds < DIAMOND_COST.cast) {
       this.showMessage(
@@ -8339,7 +8458,7 @@ class GameScene extends BaseScene {
     this.mana -= cost;
 
     if (free) {
-      this.petCharges--;
+      this.allyCharges--;
     } else {
       this.diamonds -= DIAMOND_COST.cast;
       this.saveDia();
@@ -8381,7 +8500,7 @@ class GameScene extends BaseScene {
     SFX.play('summon');
 
     this.showMessage(
-      `Aliados invocados por 1 minuto! ${free ? `Usos grátis restantes: ${this.petCharges}.` : `Gastou ◆${DIAMOND_COST.cast}.`}`,
+      `Aliados invocados por 1 minuto! ${free ? `Usos grátis restantes: ${this.allyCharges}.` : `Gastou ◆${DIAMOND_COST.cast}.`}`,
     );
   }
 
@@ -10152,17 +10271,17 @@ class GameScene extends BaseScene {
     this.refreshInterface();
   }
 
-  private buyPetHere(k: AllyKind) {
+  private buyAllyHere(k: AllyKind) {
     let note: string;
 
     if (this.finalChoice === 'tech') {
       note = 'No Mundo Supremo os aliados não existem.';
-    } else if (this.petCount(k) >= 2) {
+    } else if (this.allyCount(k) >= 2) {
       note = 'Você já tem 2 aliados deste tipo.';
-    } else if (this.diamonds < DIAMOND_COST.pet) {
-      note = `Você não tem diamantes disponíveis (precisa de ◆${DIAMOND_COST.pet}, tem ◆${this.diamonds}).`;
+    } else if (this.diamonds < DIAMOND_COST.ally) {
+      note = `Você não tem diamantes disponíveis (precisa de ◆${DIAMOND_COST.ally}, tem ◆${this.diamonds}).`;
     } else {
-      this.diamonds -= DIAMOND_COST.pet;
+      this.diamonds -= DIAMOND_COST.ally;
       this.saveDia();
       this.spawnAllies(k, 1);
       SFX.play('summon');
@@ -10251,8 +10370,8 @@ class GameScene extends BaseScene {
       ).setScale(3).setDepth(52),
     );
 
-    if (this.petPreview) {
-      const pk = this.petPreview;
+    if (this.allyPreview) {
+      const pk = this.allyPreview;
       const spots = pk === 'drone'
         ? [{ x: 62, y: 170 }, { x: 218, y: 170 }]
         : pk === 'human'
@@ -10288,7 +10407,7 @@ class GameScene extends BaseScene {
     );
     button(
       305, 304, 'ALIADOS', !armorOn ? '#3a5aa0' : '#2a2f33',
-      () => { this.shopTab = 'pets'; this.openHeroPanel(); }, 14, 255, 38,
+      () => { this.shopTab = 'allies'; this.openHeroPanel(); }, 14, 255, 38,
     );
 
     panel.lineStyle(1, GOLD, 0.6);
@@ -10332,44 +10451,71 @@ class GameScene extends BaseScene {
     } else {
       label(
         40, 360,
-        `Habilidade ALIADOS: invoca os 3 por 1 min · grátis: ${this.petCharges}/3 · depois ◆${DIAMOND_COST.cast}.`,
-        11, '#b9d6c0',
+        `Comprados ficam com você na partida (máx. 2 de cada). A habilidade ALIADOS chama os 3 por 1 min · grátis ${this.allyCharges}/3 · depois ◆${DIAMOND_COST.cast}.`,
+        10, '#b9d6c0',
       ).setWordWrapWidth(520);
 
-      const pets: Array<{ k: AllyKind; name: string; text: string }> = [
-        { k: 'dog', name: 'CÃO', text: 'Rápido, morde de perto.' },
-        { k: 'human', name: 'SOLDADO', text: 'Forte e resistente.' },
-        { k: 'drone', name: 'DRONE', text: 'Voa e atira de longe.' },
-      ];
+      const kinds: AllyKind[] = ['dog', 'human', 'drone'];
 
-      pets.forEach((p, n) => {
+      kinds.forEach((k, n) => {
+        const info = ALLY_INFO[k];
+        const cfg = ALLY_CFG[k];
         const x = 36 + n * 178;
-        const y = 392;
-        const on = this.petPreview === p.k;
+        const y = 390;
+        const on = this.allyPreview === k;
 
         panel.fillStyle(0x0d1114, 0.95);
-        panel.fillRoundedRect(x, y, 170, 250, 6);
+        panel.fillRoundedRect(x, y, 170, 256, 6);
         panel.lineStyle(on ? 3 : 1, on ? GOLD_LIGHT : GOLD_DARK, 1);
-        panel.strokeRoundedRect(x, y, 170, 250, 6);
+        panel.strokeRoundedRect(x, y, 170, 256, 6);
 
-        keep(this.createAllyVisual(p.k).setScale(3).setPosition(x + 85, y + 62).setDepth(52));
+        keep(this.createAllyVisual(k).setScale(2.4).setPosition(x + 85, y + 40).setDepth(52));
 
-        label(x + 85 - 40, y + 104, p.name, 14, '#f0d58a', true);
-        label(x + 12, y + 128, p.text, 10, '#d9d0b7').setWordWrapWidth(146);
-        label(x + 12, y + 150, `Você tem ${this.petCount(p.k)}/2`, 11, '#cfe8d8');
+        label(x + 85, y + 66, info.name, 13, '#f0d58a', true).setOrigin(0.5, 0);
+        label(x + 85, y + 84, info.role, 10, '#9fd0ff').setOrigin(0.5, 0);
+
+        const bars: [string, number, number][] = [
+          ['FORÇA', info.force, 0xff8a6a],
+          ['VELOC.', info.speed, 0x8ae0a0],
+          ['ALCANCE', info.reach, 0x8ac8ff],
+        ];
+
+        bars.forEach(([name, val, col], b) => {
+          const by = y + 102 + b * 14;
+
+          label(x + 12, by - 2, name, 9, '#c9a24d', true);
+
+          for (let i = 0; i < 5; i++) {
+            panel.fillStyle(i < val ? col : 0x23262a, 1);
+            panel.fillRect(x + 70 + i * 18, by, 14, 8);
+            panel.lineStyle(1, 0x000000, 1);
+            panel.strokeRect(x + 70 + i * 18, by, 14, 8);
+          }
+        });
+
+        label(
+          x + 12, y + 146,
+          `Dano ${this.allyDamage(k)} · ${(1000 / cfg.rate).toFixed(1)} golpes/s`,
+          10, '#ffe08a', true,
+        );
+
+        label(x + 12, y + 162, info.traits.map(t => `• ${t}`).join('\n'), 9, '#d9d0b7')
+          .setLineSpacing(2);
+
+        label(x + 12, y + 202, `Você tem ${this.allyCount(k)}/2`, 10, '#cfe8d8');
 
         button(
-          x + 10, y + 172, on ? 'VOLTAR' : 'VER NO HERÓI', '#3a4a5a',
+          x + 8, y + 220, on ? 'VOLTAR' : 'VER', '#3a4a5a',
           () => {
-            this.petPreview = on ? null : p.k;
+            this.allyPreview = on ? null : k;
             this.openHeroPanel();
           },
-          11, 150, 30,
+          10, 58, 30,
         );
 
         button(
-          x + 10, y + 210, `COMPRAR · ◆${DIAMOND_COST.pet}`, '#3a5aa0',
-          () => this.buyPetHere(p.k), 11, 150, 30,
+          x + 70, y + 220, `COMPRAR ◆${DIAMOND_COST.ally}`, '#3a5aa0',
+          () => this.buyAllyHere(k), 10, 92, 30,
         );
       });
     }
@@ -11121,7 +11267,7 @@ class GameScene extends BaseScene {
       || this.diamonds >= DIAMOND_COST.cast;
   }
 
-  private petCount(kind: AllyKind): number {
+  private allyCount(kind: AllyKind): number {
     return this.allies.filter(a => a.kind === kind && !a.until).length;
   }
 
@@ -11185,7 +11331,7 @@ class GameScene extends BaseScene {
       40, 150, 520, 720, `LOJA DE DIAMANTES  ◆ ${this.diamonds}`,
     );
 
-    text(60, 196, note || 'Diamantes só são obtidos por PIX. Os itens abaixo são permanentes (torres e ultimate).', 11, note ? '#9fe3b0' : '#d9d0b7');
+    text(60, 196, note || 'Diamantes e pacotes vêm por PIX. Torres nv.6 e ultimate são permanentes; aliados ficam na partida.', 11, note ? '#9fe3b0' : '#d9d0b7');
 
     const kinds: TowerKind[] = ['basic', 'rapid', 'sniper'];
 
@@ -11202,16 +11348,16 @@ class GameScene extends BaseScene {
       );
     });
 
-    text(60, 330, 'PETS · cada compra traz 1 aliado (máx. 2 de cada tipo)', 12, '#f0d58a');
+    text(60, 330, 'ALIADOS · cada compra traz 1 aliado (máx. 2 de cada tipo)', 12, '#f0d58a');
 
-    const pets: [AllyKind, string][] = [['dog', 'CÃO'], ['human', 'SOLDADO'], ['drone', 'DRONE']];
+    const allyRow: [AllyKind, string][] = [['dog', 'CÃO'], ['human', 'SOLDADO'], ['drone', 'DRONE']];
 
-    pets.forEach(([k, name], i) => {
+    allyRow.forEach(([k, name], i) => {
       button(
         60 + i * 164, 354,
-        `${name} ${this.petCount(k)}/2 · ◆${DIAMOND_COST.pet}`,
+        `${name} ${this.allyCount(k)}/2 · ◆${DIAMOND_COST.ally}`,
         '#3a5aa0',
-        () => this.buyPet(k), 156, 36,
+        () => this.buyAlly(k), 156, 36,
       );
     });
 
@@ -11230,10 +11376,10 @@ class GameScene extends BaseScene {
     );
 
     text(
-      60, 560,
-      'PACOTES\n' +
-      DIAMOND_PACKS.map(p => `${p.label}  →  ◆${p.diamonds}  ·  ${p.desc}`).join('\n'),
-      11, '#cfe8ff',
+      60, 556,
+      'PACOTES · liberados automaticamente após a confirmação do pagamento\n\n' +
+      DIAMOND_PACKS.map(p => `${p.label} · ${p.title}: ${p.desc}`).join('\n'),
+      10, '#cfe8ff',
     );
 
     button(60, 800, 'VOLTAR', '#3a4046', () => this.openHeroPanel(), 480, 40, 12);
@@ -11252,21 +11398,21 @@ class GameScene extends BaseScene {
     this.openDiamondShop(`Nível 6 liberado para a torre ${TOWER_STATS[k].name}! Melhore uma torre nível 5.`);
   }
 
-  private buyPet(k: AllyKind) {
+  private buyAlly(k: AllyKind) {
     if (this.finalChoice === 'tech') {
-      return this.openDiamondShop('No mundo supremo os pets não existem.');
+      return this.openDiamondShop('No Mundo Supremo os aliados não existem.');
     }
 
-    if (this.petCount(k) >= 2) return this.openDiamondShop('Você já tem 2 pets deste tipo.');
+    if (this.allyCount(k) >= 2) return this.openDiamondShop('Você já tem 2 aliados deste tipo.');
 
-    if (this.diamonds < DIAMOND_COST.pet) {
+    if (this.diamonds < DIAMOND_COST.ally) {
       return this.openDiamondShop('Diamantes insuficientes. Compre um pacote por PIX.');
     }
 
-    this.diamonds -= DIAMOND_COST.pet;
+    this.diamonds -= DIAMOND_COST.ally;
     this.saveDia();
     this.spawnAllies(k, 1);
-    this.openDiamondShop('Pet comprado! Ele já está ao seu lado.');
+    this.openDiamondShop('Aliado comprado! Ele já está ao seu lado.');
   }
 
   private buyUlt() {
@@ -11282,60 +11428,245 @@ class GameScene extends BaseScene {
     this.openDiamondShop('Ultimate liberado para todos os heróis!');
   }
 
-  // ATENÇÃO: sem servidor o jogo não confirma o pagamento PIX. O botão
-  // "JÁ PAGUEI" credita na confiança; para valer de verdade, ligue um
-  // webhook (Mercado Pago, Stripe...) que credite os diamantes.
-  private openDiamondPix() {
-    const { text, button } = this.diaModal(40, 110, 520, 780, 'COMPRAR DIAMANTES · PIX');
+  private allyDamage(k: AllyKind): number {
+    const cfg = ALLY_CFG[k];
 
-    text(60, 156, 'Escolha o pacote: o código PIX Copia e Cola é copiado. Pague no app do banco e depois toque em JÁ PAGUEI.', 12, '#efe6cc');
+    return (cfg.base + Math.floor(this.heroLevel * cfg.perLevel))
+      * (this.finalChoice === 'real' ? 1.5 : 1);
+  }
 
-    const note = text(60, 650, '', 11, '#9fe3b0');
-    let chosen: (typeof DIAMOND_PACKS)[number] | null = null;
+  // Entrega o conteúdo do pacote. Item que a pessoa já tem vira diamante.
+  private deliverPack(p: DiamondPack): string {
+    const got: string[] = [];
+    let extra = p.diamonds;
+
+    for (const item of p.items) {
+      if (item === 'lv6all') {
+        const freed: string[] = [];
+
+        for (const k of ['basic', 'rapid', 'sniper'] as TowerKind[]) {
+          if (this.lv6[k]) {
+            extra += DIAMOND_COST.tower;
+          } else {
+            this.lv6[k] = true;
+            freed.push(TOWER_STATS[k].name);
+          }
+        }
+
+        if (freed.length) got.push(`Nível 6: ${freed.join(', ')}`);
+      } else if (item === 'ult') {
+        if (this.ultUnlocked) {
+          extra += DIAMOND_COST.ult;
+        } else {
+          this.ultUnlocked = true;
+          got.push('Ultimate liberado');
+        }
+      } else if (item === 'alliesAll') {
+        const came: string[] = [];
+
+        for (const k of ['dog', 'human', 'drone'] as AllyKind[]) {
+          if (this.finalChoice === 'tech' || this.allyCount(k) >= 2) {
+            extra += DIAMOND_COST.ally;
+          } else {
+            this.spawnAllies(k, 1);
+            came.push(ALLY_INFO[k].name);
+          }
+        }
+
+        if (came.length) got.push(`Aliados: ${came.join(', ')}`);
+      }
+    }
+
+    this.diamonds += extra;
+    this.saveDia();
+    SFX.play('summon');
+
+    if (extra > 0) {
+      got.push(p.items.length ? `◆${extra} (itens que você já tinha)` : `◆${extra} diamantes`);
+    }
+
+    this.refreshInterface();
+    return `Pacote ${p.title} liberado!\n${got.join(' · ')}`;
+  }
+
+  private stopPixPoll() {
+    if (this.pixPoll !== null) {
+      window.clearInterval(this.pixPoll);
+      this.pixPoll = null;
+    }
+  }
+
+  // Pergunta ao servidor se algum pedido foi pago. Só credita se o banco
+  // confirmou (o servidor marca o pedido como entregue para não repetir).
+  private async checkRemoteOrders(): Promise<string | null> {
+    if (!PAYMENT_API) return null;
+
+    const orders = loadOrders();
+
+    for (const o of orders.filter(x => x.remote)) {
+      try {
+        const r = await fetch(`${PAYMENT_API}/pix/${encodeURIComponent(o.remote as string)}/claim`, {
+          method: 'POST',
+        });
+        const d = await r.json();
+
+        if (d && d.paid && d.pack === o.pack) {
+          const pack = DIAMOND_PACKS.find(p => p.id === o.pack);
+
+          saveOrders(loadOrders().filter(x => x.order !== o.order));
+
+          if (pack) return this.deliverPack(pack);
+        }
+      } catch {
+        // sem conexão: tenta de novo depois
+      }
+    }
+
+    return null;
+  }
+
+  private redeemPrompt(): string {
+    const typed = (window.prompt('Digite o código de resgate que você recebeu:') || '')
+      .toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+    if (!typed) return '';
+
+    const orders = loadOrders();
+    const hit = orders.find(o => redeemCode(o.order, o.pack) === typed);
+
+    if (!hit) {
+      return 'Código inválido para os pedidos deste aparelho. Confira se digitou certo.';
+    }
+
+    const pack = DIAMOND_PACKS.find(p => p.id === hit.pack);
+
+    saveOrders(orders.filter(o => o.order !== hit.order));
+
+    return pack ? this.deliverPack(pack) : 'Pacote não encontrado.';
+  }
+
+  private openDiamondPix(msg = '') {
+    this.stopPixPoll();
+
+    const { text, button } = this.diaModal(40, 110, 520, 780, 'COMPRAR COM PIX');
+
+    text(
+      60, 156,
+      PAYMENT_API
+        ? 'Escolha o pacote: o código PIX é copiado. Pague no app do banco e aguarde: assim que o banco confirmar, os itens entram sozinhos.'
+        : 'Escolha o pacote: o código PIX é copiado. Pague no app do banco e envie o comprovante com o número do pedido. Você recebe um código de resgate que libera os itens.',
+      11, '#efe6cc',
+    );
+
+    const note = text(60, 566, msg, 11, msg ? '#9fe3b0' : '#9fe3b0');
 
     DIAMOND_PACKS.forEach((p, i) => {
+      const y = 214 + i * 57;
+
       button(
-        60, 214 + i * 66,
-        `${p.label}  ·  ◆${p.diamonds}  ·  ${p.desc}`,
-        '#1f7a5a',
-        () => {
-          chosen = p;
-
-          const payload = buildPixPayload(p.value);
-          const show = (ok: boolean) => {
-            note.setColor(ok ? '#9fe3b0' : '#ffd9a0');
-            note.setText(
-              `${ok ? 'Código PIX copiado!' : 'Não foi possível copiar automaticamente.'}\n` +
-              `${payload}\n\nPacote escolhido: ${p.label} (◆${p.diamonds}).`,
-            );
-          };
-
-          if (navigator.clipboard) {
-            navigator.clipboard.writeText(payload).then(() => show(true), () => show(false));
-          } else {
-            show(false);
-          }
-        },
-        480, 54, 12,
+        60, y, `${p.label} · ${p.title}${p.diamonds ? ` · ◆${p.diamonds}` : ''}`, '#1f7a5a',
+        () => this.startPixOrder(p, note),
+        480, 32, 12,
       );
+
+      text(64, y + 35, p.desc, 10, '#cfe8ff');
     });
 
     button(
-      60, 560, 'JÁ PAGUEI · CREDITAR DIAMANTES', '#8a6a22',
+      60, 760,
+      PAYMENT_API ? 'VERIFICAR PAGAMENTO' : 'TENHO UM CÓDIGO DE RESGATE',
+      '#8a6a22',
       () => {
-        if (!chosen) {
-          note.setColor('#ffd9a0').setText('Escolha um pacote primeiro.');
+        if (PAYMENT_API) {
+          note.setColor('#ffd9a0').setText('Verificando com o banco...');
+          void this.checkRemoteOrders().then(res => {
+            if (res) this.openDiamondShop(res);
+            else if (note.active) note.setText('Nenhum pagamento confirmado ainda. Pode levar alguns segundos.');
+          });
           return;
         }
 
-        this.diamonds += chosen.diamonds;
-        this.saveDia();
-        this.openDiamondShop(`◆${chosen.diamonds} diamantes creditados!`);
+        const res = this.redeemPrompt();
+
+        if (res.startsWith('Pacote')) this.openDiamondShop(res);
+        else if (res) note.setColor('#ffb0a0').setText(res);
       },
       480, 44, 12,
     );
 
-    button(60, 830, 'VOLTAR', '#3a4046', () => this.openDiamondShop(), 480, 40, 12);
+    button(60, 830, 'VOLTAR', '#3a4046', () => {
+      this.stopPixPoll();
+      this.openDiamondShop();
+    }, 480, 40, 12);
+  }
+
+  private startPixOrder(p: DiamondPack, note: Phaser.GameObjects.Text) {
+    const copy = (payload: string, extra: string) => {
+      const show = (ok: boolean) => {
+        if (!note.active) return;
+        note.setColor(ok ? '#9fe3b0' : '#ffd9a0');
+        note.setText(
+          `${ok ? 'Código PIX copiado!' : 'Copie o código abaixo:'}\n${payload}\n\n${extra}`,
+        );
+      };
+
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(payload).then(() => show(true), () => show(false));
+      } else {
+        show(false);
+      }
+    };
+
+    if (PAYMENT_API) {
+      note.setColor('#ffd9a0').setText('Gerando cobrança PIX...');
+
+      fetch(`${PAYMENT_API}/pix`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pack: p.id }),
+      })
+        .then(r => r.json())
+        .then((d: { id?: string; copiaECola?: string }) => {
+          if (!d.id || !d.copiaECola) throw new Error('resposta inválida');
+
+          const order = newOrderCode();
+          saveOrders([...loadOrders(), { order, pack: p.id, at: Date.now(), remote: String(d.id) }]);
+
+          copy(d.copiaECola, `Pacote ${p.title} (${p.label}). Aguardando o banco confirmar...`);
+
+          this.stopPixPoll();
+          this.pixPoll = window.setInterval(() => {
+            if (!note.active) {
+              this.stopPixPoll();
+              return;
+            }
+
+            void this.checkRemoteOrders().then(res => {
+              if (res) {
+                this.stopPixPoll();
+                this.openDiamondShop(res);
+              }
+            });
+          }, 5000);
+        })
+        .catch(() => {
+          if (note.active) {
+            note.setColor('#ffb0a0').setText('Não foi possível falar com o servidor de pagamento. Tente de novo.');
+          }
+        });
+
+      return;
+    }
+
+    const order = newOrderCode();
+    saveOrders([...loadOrders(), { order, pack: p.id, at: Date.now() }]);
+
+    copy(
+      buildPixPayload(p.value, order),
+      `PEDIDO: ${order} · ${p.title} (${p.label})\n` +
+      `Depois de pagar, envie o comprovante e o número do pedido para ${PIX_KEY}. ` +
+      'Você recebe um código de resgate; toque em TENHO UM CÓDIGO DE RESGATE.',
+    );
   }
 
   // ---------- empurrão da torre nível 6 ----------
@@ -11460,7 +11791,7 @@ class GameScene extends BaseScene {
     }
   }
 
-  // Os pets assumem o visual do herói que está no comando.
+  // Os aliados assumem o visual do herói que está no comando.
   private createAllyVisual(kind: AllyKind): Phaser.GameObjects.Container {
     const owner: HeroKind | 'fused' = this.fused ? 'fused' : this.heroKind;
     const pal = {
@@ -11729,8 +12060,7 @@ class GameScene extends BaseScene {
       if (target && a.cooldown <= 0 && best <= cfg.range + 6) {
         a.cooldown = cfg.rate;
 
-        const dmg = (cfg.base + Math.floor(this.heroLevel * cfg.perLevel))
-          * (this.finalChoice === 'real' ? 1.5 : 1);
+        const dmg = this.allyDamage(a.kind);
         const tx = target.body.x;
         const ty = target.body.y;
 
