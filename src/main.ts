@@ -418,7 +418,7 @@ const WORLD_INFO: Record<number, { name: string; short: string; cost: number }> 
   3: { name: 'MUNDO 3 · TECNOLÓGICO', short: 'M3', cost: 150000 },
 };
 
-const SUPREME_WORLD_COST = 300000;
+const SUPREME_WORLD_COST = 240000;
 
 // Cenário nos céus (escolha do Mundo Tecnológico no nível 90).
 const SKY_COLORS = {
