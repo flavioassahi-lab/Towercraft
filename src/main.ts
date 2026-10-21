@@ -1672,7 +1672,7 @@ class GameScene extends BaseScene {
   private xp = 0;
   private heroLevel = 1;
   private wave = 0;
-  private baseHP = 20;
+  private baseHP = 100;
 
   private maxMana = 100;
   private mana = 100;
@@ -1718,7 +1718,7 @@ class GameScene extends BaseScene {
   private heroInvulnUntil = 0;
   private worldObjs: Phaser.GameObjects.GameObject[] = [];
   private extraMana = 0;
-  private maxBaseHP = 20;
+  private maxBaseHP = 100;
   private stock: Record<TowerKind, number> = { basic: 0, rapid: 0, sniper: 0 };
   private allies: Ally[] = [];
 
@@ -1838,7 +1838,7 @@ class GameScene extends BaseScene {
     this.heroKind = hk;
     this.unlockedHeroes = [hk];
     this.extraMana = ex.mana;
-    this.maxBaseHP = 20 + ex.base * 4;
+    this.maxBaseHP = 100 + ex.base * 20;
     this.baseHP = this.maxBaseHP;
     this.heroAttackCooldown = 0;
 
@@ -4430,7 +4430,12 @@ class GameScene extends BaseScene {
 
     this.addContextButton(
       398, 876, 'CANCELAR', '#7a352c',
-      () => this.closeContextMenu(),
+      () => {
+        // Cancelar sai do modo de construção: sem mais sombra.
+        this.cancelBuild();
+        this.closeContextMenu();
+        this.refreshInterface();
+      },
       150, 30,
     );
   }
@@ -5952,12 +5957,12 @@ class GameScene extends BaseScene {
     }
 
     this.mana -= cost;
-    this.baseHP = Math.min(this.maxBaseHP, this.baseHP + 3 + rank);
+    this.baseHP = Math.min(this.maxBaseHP, this.baseHP + 5 * (3 + rank));
 
-    this.floatText(300, 740, `+${3 + rank} VIDA`, '#7dff9a', 14);
+    this.floatText(300, 740, `+${5 * (3 + rank)} VIDA`, '#7dff9a', 14);
 
     this.showMessage(
-      `Reparo utilizado! A base recuperou até ${3 + rank} pontos de vida.`,
+      `Reparo utilizado! A base recuperou até ${5 * (3 + rank)} pontos de vida.`,
     );
   }
 
@@ -6007,7 +6012,7 @@ class GameScene extends BaseScene {
       this.time.delayedCall(450, () => { if (!this.gameOver) this.ultArrows(dmg, rank); });
       this.time.delayedCall(1300, () => { if (!this.gameOver) this.ultMeteor(dmg, rank); });
 
-      this.baseHP = Math.min(this.maxBaseHP, this.baseHP + 3 + rank);
+      this.baseHP = Math.min(this.maxBaseHP, this.baseHP + 5 * (3 + rank));
       this.floatText(this.hero.x, this.hero.y - 70, 'JUÍZO FINAL!', '#fff0a0', 18);
       this.showMessage('JUÍZO FINAL! Os três poderes se unem.');
       return;
@@ -6386,7 +6391,7 @@ class GameScene extends BaseScene {
       this.baseHP / this.maxBaseHP,
       shield ? 0x86d8ff : 0xe2574c,
       shield ? 0x1f5f8f : 0x7a1d18,
-      this.maxBaseHP,
+      10,
     );
 
     this.drawBar(
