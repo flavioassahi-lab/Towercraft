@@ -105,8 +105,8 @@ const SKILL_INFO: Record<SkillKind, {
     mana: 35,
   },
   repair: {
-    name: 'REPARO',
-    description: 'Recupera vida da fortaleza.',
+    name: 'ALIADOS',
+    description: 'Invoca cão, soldado e drone por 1 min. 3 usos grátis; depois ◆5 cada.',
     mana: 40,
   },
   strike: {
@@ -188,13 +188,15 @@ type SfxName =
   | 't_basic' | 't_rapid' | 't_sniper'
   | 'kill' | 'hurt' | 'levelup' | 'wave' | 'net' | 'build' | 'upgrade'
   | 'coin' | 'explosion' | 'repair' | 'ult' | 'clones' | 'lightning'
-  | 'death' | 'revive' | 'victory' | 'defeat' | 'boss';
+  | 'death' | 'revive' | 'victory' | 'defeat' | 'boss'
+  | 'swoosh' | 'logo' | 'thunder' | 'summon';
 
 type Emotion = 'neutral' | 'happy' | 'angry' | 'hurt' | 'surprised' | 'sad';
 
 const HERO_LINES: Record<HeroKind, {
   pitch: number;
   rate: number;
+  who: 'male' | 'female' | 'old';
   select: string[];
   level: string;
   death: string;
@@ -203,41 +205,44 @@ const HERO_LINES: Record<HeroKind, {
   skill: Record<string, string>;
 }> = {
   guardiao: {
-    pitch: 0.55,
-    rate: 0.9,
+    pitch: 0.7,
+    rate: 0.95,
+    who: 'male',
     select: ['Pela fortaleza!', 'Nenhum passará!', 'Meu escudo é a muralha!'],
     level: 'Mais forte!',
     death: 'Argh!',
     revive: 'Ainda de pé!',
     idle: ['Em guarda!', 'A muralha não cai.', 'Venham quando quiserem!'],
     skill: {
-      explosion: 'Impacto!', repair: 'Reforçar!', strike: 'Golpe final!',
+      explosion: 'Impacto!', repair: 'Aliados, a mim!', strike: 'Golpe final!',
       clones: 'Irmãos de armas!', lightning: 'Trovão!',
     },
   },
   patrulheiro: {
-    pitch: 1.05,
-    rate: 1.15,
-    select: ['Alvo na mira!', 'Olhos abertos.', 'Pronto para a caçada!'],
+    pitch: 1.2,
+    rate: 1.1,
+    who: 'female',
+    select: ['Alvo na mira!', 'Olhos abertos.', 'Pronta para a caçada!'],
     level: 'Mira afiada!',
     death: 'Ugh!',
     revive: 'De volta ao jogo!',
     idle: ['Vento a favor.', 'Nada escapa de mim.', 'Uma flecha, um destino.'],
     skill: {
-      explosion: 'Fogo!', repair: 'Consertando!', strike: 'Chuva de flechas!',
+      explosion: 'Fogo!', repair: 'Venham, amigos!', strike: 'Chuva de flechas!',
       clones: 'Sombras!', lightning: 'Raio!',
     },
   },
   arcanista: {
-    pitch: 1.5,
-    rate: 1.0,
-    select: ['A magia me guia.', 'Sinto o poder!', 'Os astros respondem.'],
+    pitch: 0.4,
+    rate: 0.7,
+    who: 'old',
+    select: ['A magia me guia, meu jovem.', 'Sinto o poder...', 'Os astros respondem.'],
     level: 'Meu poder cresce!',
     death: 'Ahh!',
     revive: 'A magia me trouxe de volta!',
     idle: ['A magia vibra…', 'Sinto uma presença.', 'Os astros sussurram.'],
     skill: {
-      explosion: 'Explosão arcana!', repair: 'Restaurar!', strike: 'Meteoro!',
+      explosion: 'Explosão arcana!', repair: 'Criaturas, atendam ao meu chamado!', strike: 'Meteoro!',
       clones: 'Ilusões!', lightning: 'Relâmpago!',
     },
   },
@@ -457,6 +462,22 @@ const SFX = (() => {
       case 'victory':
         [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(f, 0.3, 'triangle', 0.28, { delay: i * 0.16 }));
         break;
+      case 'swoosh':
+        noise(0.7, 0.45, 400, 'bandpass', { to: 6000, q: 1.5 });
+        break;
+      case 'logo':
+        [880, 1318, 1760].forEach((f, i) => tone(f, 0.5, 'triangle', 0.22, { delay: i * 0.12 }));
+        tone(220, 1.3, 'sine', 0.3, { to: 330 });
+        break;
+      case 'thunder':
+        noise(1.4, 0.8, 300, 'lowpass', { to: 60 });
+        tone(50, 1.1, 'sine', 0.6, { to: 25 });
+        break;
+      case 'summon':
+        tone(300, 0.5, 'sine', 0.3, { to: 900 });
+        tone(450, 0.5, 'triangle', 0.2, { to: 1350, delay: 0.1 });
+        noise(0.4, 0.2, 2000, 'highpass', { to: 5000 });
+        break;
       case 'boss':
         tone(70, 1.2, 'sawtooth', 0.4, { to: 38 });
         tone(105, 1.0, 'square', 0.18, { to: 55, delay: 0.1 });
@@ -471,7 +492,26 @@ const SFX = (() => {
     }
   };
 
-  const say = (text: string, pitch: number, rate: number) => {
+  const voiceFor = (who: 'male' | 'female' | 'old'): SpeechSynthesisVoice | null => {
+    try {
+      const list = window.speechSynthesis.getVoices().filter(v => /^pt/i.test(v.lang));
+
+      if (!list.length) return null;
+
+      const FEM = /maria|francisca|luciana|helena|fernanda|vit[oó]ria|camila|google portugu|female|feminin|thalita|let[ií]cia|raquel|joana/i;
+      const MAS = /daniel|felipe|ricardo|ant[oô]nio|jorge|thiago|male|masculin|donato|heitor|val[eé]rio|marcos/i;
+
+      if (who === 'female') return list.find(v => FEM.test(v.name)) ?? list[0];
+
+      return list.find(v => MAS.test(v.name) && !FEM.test(v.name))
+        ?? list.find(v => !FEM.test(v.name))
+        ?? list[0];
+    } catch {
+      return null;
+    }
+  };
+
+  const say = (text: string, pitch: number, rate: number, who: 'male' | 'female' | 'old' = 'male') => {
     if (!prefs.voice) return;
 
     try {
@@ -485,8 +525,10 @@ const SFX = (() => {
       window.speechSynthesis.cancel();
 
       const u = new SpeechSynthesisUtterance(text);
+      const voice = voiceFor(who);
 
-      u.lang = 'pt-BR';
+      u.lang = voice ? voice.lang : 'pt-BR';
+      if (voice) u.voice = voice;
       u.pitch = pitch;
       u.rate = rate;
       u.volume = 0.9;
@@ -876,7 +918,81 @@ const PIX_PACKS = [
 // Diamantes: moeda que só vem do PIX.
 const DIAMOND_KEY = 'towercraft_diamonds_v1';
 
-const DIAMOND_COST = { tower: 15, pet: 15, ult: 20 };
+const DIAMOND_COST = { tower: 15, pet: 15, ult: 20, cast: 5, life: 5 };
+
+// ---------- salvar / continuar ----------
+const SAVE_KEY = 'towercraft_save_v1';
+
+type SavedTower = {
+  kind: TowerKind;
+  x: number;
+  y: number;
+  level: number;
+  hp: number;
+  totalInvested: number;
+};
+
+type SaveData = {
+  v: 1;
+  at: number;
+  heroKind: HeroKind;
+  unlockedHeroes: HeroKind[];
+  companions: HeroKind[];
+  coins: number;
+  xp: number;
+  heroLevel: number;
+  skillPoints: number;
+  skillLevels: Record<SkillKind, number>;
+  equip: Record<HeroKind, Record<Gear, number>>;
+  wave: number;
+  baseHP: number;
+  maxBaseHP: number;
+  extraMana: number;
+  mana: number;
+  heroHp: number;
+  heroDeaths: number;
+  worldLevel: number;
+  stock: Record<TowerKind, number>;
+  towers: SavedTower[];
+  allies: AllyKind[];
+  petCharges: number;
+  ultCharges: number;
+  lifeCharges: number;
+  nextRoute: 'left' | 'right';
+  repeatGate: boolean;
+};
+
+function readSave(): SaveData | null {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+
+    const d = JSON.parse(raw) as SaveData;
+
+    if (!d || d.v !== 1 || !Array.isArray(d.towers) || !d.heroKind) return null;
+
+    return d;
+  } catch {
+    return null;
+  }
+}
+
+function writeSave(d: SaveData): boolean {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(d));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearSave() {
+  try {
+    localStorage.removeItem(SAVE_KEY);
+  } catch {
+    // ignora
+  }
+}
 
 const DIAMOND_PACKS = [
   { label: 'R$ 15,00', value: 15, diamonds: 15, desc: '1 torre nv.6 OU 1 pet' },
@@ -1012,10 +1128,10 @@ const SUPREME_DAMAGE = 99999;
 const WORLD_INFO: Record<number, { name: string; short: string; cost: number }> = {
   1: { name: 'MUNDO 1 · PRIMITIVO', short: 'M1', cost: 0 },
   2: { name: 'MUNDO 2 · GRÉCIA ANTIGA', short: 'M2', cost: 20000 },
-  3: { name: 'MUNDO 3 · TECNOLÓGICO', short: 'M3', cost: 150000 },
+  3: { name: 'MUNDO 3 · TECNOLÓGICO', short: 'M3', cost: 130000 },
 };
 
-const SUPREME_WORLD_COST = 240000;
+const SUPREME_WORLD_COST = 160000;
 
 // Cenário nos céus (escolha do Mundo Tecnológico no nível 90).
 const SKY_COLORS = {
@@ -1191,6 +1307,7 @@ type Ally = {
   y: number;
   cooldown: number;
   slot: number;
+  until?: number;
 };
 
 type Enemy = {
@@ -2267,6 +2384,159 @@ class BaseScene extends Phaser.Scene {
     return c;
   }
 
+  protected emote(c: Phaser.GameObjects.Container, emo: Emotion, ms = 600) {
+    if (!c.active) return;
+
+    this.setFace(c, emo);
+
+    this.time.delayedCall(ms, () => {
+      if (c.active) this.setFace(c, (c.getData('baseEmo') as Emotion) || 'neutral');
+    });
+  }
+
+  // Balão de fala + boca mexendo (+ voz, se pedido).
+  protected speak(v: Phaser.GameObjects.Container, text: string, kind: HeroKind, voice: boolean) {
+    if (!v.active) return;
+
+    const k = Math.abs(v.scaleY) || 1;
+
+    v.setData('talk', this.time.now + Math.max(900, text.length * 75));
+    this.floatText(v.x, v.y - 60 * k, text, '#fff0c0', k > 2 ? 14 : 11);
+
+    if (voice) {
+      const l = HERO_LINES[kind];
+      SFX.say(text, l.pitch, l.rate, l.who);
+    }
+  }
+
+  // Rosto vivo e poses de tempos em tempos: ninguém fica estátua.
+  protected lifeTick(v: Phaser.GameObjects.Container, kind: HeroKind, voice: boolean, fast = false) {
+    const now = this.time.now;
+
+    this.tickFace(v, now);
+
+    const nx = v.getData('nextIdle') as number | undefined;
+
+    if (nx === undefined) {
+      v.setData('nextIdle', now + (fast ? 1500 : 3000) + Math.random() * 3000);
+      return;
+    }
+
+    if (now < nx || !v.visible || v.getData('moving')) return;
+
+    v.setData(
+      'nextIdle',
+      now + (fast ? 3500 + Math.random() * 3500 : 6000 + Math.random() * 6000),
+    );
+
+    this.doPose(v, kind, voice && Math.random() < 0.6);
+  }
+
+  protected doPose(v: Phaser.GameObjects.Container, kind: HeroKind, voice: boolean) {
+    const fl = v.scaleX < 0 ? -1 : 1;
+    const k = Math.abs(v.scaleY) || 1;
+    const sx0 = v.scaleX;
+    const sy0 = v.scaleY;
+    const x = v.x;
+    const y = v.y;
+    const lines = HERO_LINES[kind].idle;
+
+    this.speak(v, lines[Math.floor(Math.random() * lines.length)], kind, voice);
+
+    const reset = () => {
+      if (!v.active) return;
+      v.setAngle(0);
+      v.setScale(sx0, sy0);
+    };
+
+    if (kind === 'guardiao') {
+      this.emote(v, 'angry', 900);
+
+      this.tweens.add({
+        targets: v, angle: fl * -16, scaleY: sy0 * 0.92, duration: 200,
+        onComplete: () => {
+          if (!v.active) return;
+
+          SFX.play('slash');
+
+          const arc = this.add.graphics().setDepth(12);
+
+          arc.lineStyle(5, 0xfff2c0, 0.9);
+          arc.beginPath();
+          arc.arc(0, 0, 34, -1.0, 1.0, false);
+          arc.strokePath();
+          arc.setPosition(x + fl * 20 * k, y - 8 * k);
+          arc.setRotation(fl > 0 ? -0.6 : Math.PI + 0.6);
+          arc.setScale(0.7 * k);
+
+          this.tweens.add({
+            targets: arc, scale: 1.2 * k, alpha: 0, duration: 220,
+            onComplete: () => arc.destroy(),
+          });
+
+          this.tweens.add({
+            targets: v, angle: fl * 30, scaleY: sy0 * 1.06, duration: 110,
+            yoyo: true, hold: 120, onComplete: reset,
+          });
+        },
+      });
+    } else if (kind === 'patrulheiro') {
+      this.emote(v, 'angry', 800);
+
+      this.tweens.add({
+        targets: v, angle: fl * -10, duration: 220,
+        onComplete: () => {
+          if (!v.active) return;
+
+          SFX.play('arrow');
+
+          const arrow = this.add.graphics().setDepth(12);
+
+          arrow.lineStyle(2, 0x8b5a2b, 1);
+          arrow.lineBetween(-9, 0, 7, 0);
+          arrow.fillStyle(0xd8e0e8, 1);
+          arrow.fillTriangle(7, -3, 7, 3, 14, 0);
+          arrow.setPosition(x, y - 14 * k).setRotation(-Math.PI / 2 + fl * 0.3).setScale(k);
+
+          this.tweens.add({
+            targets: arrow, x: x + fl * 40 * k, y: y - 130 * k, alpha: 0, duration: 480,
+            onComplete: () => arrow.destroy(),
+          });
+
+          this.tweens.add({
+            targets: v, angle: fl * 6, duration: 90, yoyo: true, onComplete: reset,
+          });
+        },
+      });
+    } else {
+      this.emote(v, 'happy', 1100);
+      SFX.play('orb');
+
+      const ring = this.add.circle(x, y - 22 * k, 10 * k, 0xb070ff, 0.3)
+        .setStrokeStyle(2, 0xd0a0ff, 0.9)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(12);
+
+      this.tweens.add({
+        targets: ring, scale: 3.4, alpha: 0, duration: 600,
+        onComplete: () => ring.destroy(),
+      });
+
+      for (let n = 0; n < 6; n++) {
+        const sp = this.add.circle(x + (n - 2.5) * 6 * k, y - 10 * k, 2 * k, 0xe6d7ff, 1).setDepth(12);
+
+        this.tweens.add({
+          targets: sp, y: y - (55 + (n % 3) * 8) * k, alpha: 0, duration: 700 + n * 40,
+          onComplete: () => sp.destroy(),
+        });
+      }
+
+      this.tweens.add({
+        targets: v, scaleY: sy0 * 1.12, duration: 160, yoyo: true, onComplete: reset,
+      });
+    }
+  }
+
   private makeHair(kind: HeroKind): [Phaser.GameObjects.Graphics, Phaser.GameObjects.Graphics] {
     const back = this.add.graphics();
     const front = this.add.graphics();
@@ -2576,6 +2846,11 @@ class GameScene extends BaseScene {
   protected contextTitle?: Phaser.GameObjects.Text;
 
   private heroSelected = false;
+  private shopTab: 'armor' | 'pets' = 'armor';
+  private petPreview: AllyKind | null = null;
+  private petCharges = 3;
+  private lifeCharges = 3;
+  private ultCharges = 3;
   private menuOpen = false;
   private menuObjs: Phaser.GameObjects.GameObject[] = [];
   private startData: object | undefined;
@@ -2599,8 +2874,16 @@ class GameScene extends BaseScene {
     stock?: Record<TowerKind, number>;
     extras?: { base: number; mana: number; skill: number };
     coins?: number;
+    save?: SaveData;
   }) {
-    this.startData = data;
+    this.startData = data?.save
+      ? {
+        heroKind: data.save.heroKind,
+        stock: { basic: 0, rapid: 0, sniper: 0 },
+        extras: { base: 0, mana: 0, skill: 0 },
+        coins: 300,
+      }
+      : data;
     this.menuOpen = false;
     this.menuObjs = [];
 
@@ -2647,6 +2930,11 @@ class GameScene extends BaseScene {
     this.diamonds = saved.diamonds;
     this.lv6 = { ...saved.lv6 };
     this.ultUnlocked = saved.ult;
+    this.petCharges = 3;
+    this.ultCharges = 3;
+    this.lifeCharges = 3;
+    this.shopTab = 'armor';
+    this.petPreview = null;
 
     this.coins = data?.coins ?? 200;
     this.stock = data?.stock
@@ -2683,9 +2971,43 @@ class GameScene extends BaseScene {
     this.joystickX = 0;
     this.joystickY = 0;
 
+    const sv = data?.save;
+
+    if (sv) {
+      this.coins = sv.coins;
+      this.stock = { ...sv.stock };
+      this.xp = sv.xp;
+      this.heroLevel = sv.heroLevel;
+      this.wave = sv.wave;
+      this.skillPoints = sv.skillPoints;
+      this.skillLevels = { ...freshSkills(), ...sv.skillLevels };
+      this.equip = freshEquip();
+
+      for (const h of HERO_ORDER) {
+        if (sv.equip[h]) this.equip[h] = { ...this.equip[h], ...sv.equip[h] };
+      }
+
+      this.unlockedHeroes = [...sv.unlockedHeroes];
+      this.extraMana = sv.extraMana;
+      this.maxBaseHP = sv.maxBaseHP;
+      this.baseHP = sv.baseHP;
+      this.heroDeaths = sv.heroDeaths;
+      this.worldLevel = sv.worldLevel;
+      this.petCharges = sv.petCharges;
+      this.ultCharges = sv.ultCharges;
+      this.lifeCharges = sv.lifeCharges;
+      this.nextRoute = sv.nextRoute;
+      this.repeatGate = sv.repeatGate;
+    }
+
     this.applyHeroStats();
     this.heroHp = this.heroMaxHp;
     this.mana = this.maxMana;
+
+    if (sv) {
+      this.heroHp = Math.min(this.heroMaxHp, Math.max(1, sv.heroHp));
+      this.mana = Math.min(this.maxMana, sv.mana);
+    }
   }
 
   create() {
@@ -2828,9 +3150,174 @@ class GameScene extends BaseScene {
       }
     });
 
+    const sv = (this.sys.settings.data as { save?: SaveData } | undefined)?.save;
+
+    if (sv) {
+      this.restoreSave(sv);
+    } else {
+      this.showMessage(
+        'Bem-vindo, comandante! Construa torres e inicie a primeira onda. Toque em MENU para pausar, salvar ou ajustar o som.',
+      );
+    }
+
+    this.refreshInterface();
+  }
+
+  // ---------- salvar / continuar ----------
+
+  private restoreSave(sv: SaveData) {
+    this.applyWorldTheme();
+
+    for (const k of sv.companions) this.spawnCompanion(k);
+
+    for (const t of sv.towers) this.restoreTower(t);
+
+    const counts: Partial<Record<AllyKind, number>> = {};
+    for (const a of sv.allies) counts[a] = (counts[a] ?? 0) + 1;
+
+    for (const k of Object.keys(counts) as AllyKind[]) {
+      this.spawnAllies(k, counts[k] ?? 0);
+    }
+
     this.showMessage(
-      'Bem-vindo, comandante! Construa torres e inicie a primeira onda. Toque em MENU para som e reiniciar.',
+      `Jogo continuado! Você está na onda ${this.wave}. Toque em INICIAR ONDAS quando estiver pronto.`,
     );
+  }
+
+  private restoreTower(sv: SavedTower) {
+    const stats = TOWER_STATS[sv.kind];
+    const visual = this.createTowerVisual(sv.x, sv.y, sv.kind, this.worldTheme());
+    const body = this.add.circle(sv.x, sv.y, 18, 0x000000, 0)
+      .setStrokeStyle(0, 0x000000, 0);
+
+    const level = Math.max(1, Math.min(6, sv.level));
+    const tower: Tower = {
+      body,
+      visual,
+      level,
+      cooldown: 0,
+      range: stats.range,
+      kind: sv.kind,
+      damage: stats.damage,
+      fireRate: stats.fireRate,
+      cost: this.towerPrice(sv.kind),
+      totalInvested: sv.totalInvested,
+      auraUntil: 0,
+      hp: towerMaxHp(level),
+      maxHp: towerMaxHp(level),
+      hitAt: 0,
+      streak: 0,
+      lastShotAt: 0,
+      netAt: 0,
+    };
+
+    for (let l = 2; l <= level; l++) {
+      tower.range += sv.kind === 'sniper' ? 25 : 20;
+      tower.damage += sv.kind === 'rapid' ? 1 : 2;
+      tower.fireRate = Math.max(120, tower.fireRate * 0.92);
+    }
+
+    tower.hp = Math.max(1, Math.min(tower.maxHp, sv.hp));
+    visual.setScale(1 + (level - 1) * 0.055);
+
+    if (level >= 5) {
+      visual.add(
+        this.add.circle(0, 2, 25, 0xffd54a, 0.12)
+          .setStrokeStyle(3, GOLD_LIGHT, 0.95),
+      );
+    }
+
+    if (level >= 6) {
+      visual.add(
+        this.add.circle(0, 2, 31, 0xffffff, 0.1)
+          .setStrokeStyle(3, 0x9fe8ff, 0.95)
+          .setBlendMode(Phaser.BlendModes.ADD),
+      );
+    }
+
+    const lt = visual.getData('levelText') as Phaser.GameObjects.Text | undefined;
+    if (lt) lt.setText(['I', 'II', 'III', 'IV', 'V', 'VI'][level - 1]);
+
+    this.towers.push(tower);
+  }
+
+  // Devolve null se salvou, ou o motivo de não poder salvar.
+  private saveGame(): string | null {
+    if (this.finalChoice !== null || this.fused) {
+      return 'Não dá para salvar no Mundo Supremo/Real nem com heróis fundidos.';
+    }
+
+    const active = this.activeWaves.size > 0 || this.enemies.some(e => e.alive);
+
+    const data: SaveData = {
+      v: 1,
+      at: Date.now(),
+      heroKind: this.heroKind,
+      unlockedHeroes: [...this.unlockedHeroes],
+      companions: this.companions.map(c => c.kind),
+      coins: this.coins,
+      xp: this.xp,
+      heroLevel: this.heroLevel,
+      skillPoints: this.skillPoints,
+      skillLevels: { ...this.skillLevels },
+      equip: JSON.parse(JSON.stringify(this.equip)),
+      wave: Math.max(0, active ? this.wave - 1 : this.wave),
+      baseHP: this.baseHP,
+      maxBaseHP: this.maxBaseHP,
+      extraMana: this.extraMana,
+      mana: this.mana,
+      heroHp: this.heroHp,
+      heroDeaths: this.heroDeaths,
+      worldLevel: this.worldLevel,
+      stock: { ...this.stock },
+      towers: this.towers.map(t => ({
+        kind: t.kind,
+        x: Math.round(t.body.x),
+        y: Math.round(t.body.y),
+        level: t.level,
+        hp: t.hp,
+        totalInvested: t.totalInvested,
+      })),
+      allies: this.allies.filter(a => !a.until).map(a => a.kind),
+      petCharges: this.petCharges,
+      ultCharges: this.ultCharges,
+      lifeCharges: this.lifeCharges,
+      nextRoute: this.nextRoute,
+      repeatGate: this.repeatGate,
+    };
+
+    return writeSave(data) ? null : 'Não foi possível salvar neste navegador.';
+  }
+
+  // +10 de vida da fortaleza: 3 grátis, depois ◆5 cada.
+  private buyLife() {
+    if (this.gameOver || this.modalOpen || this.menuOpen) return;
+
+    if (this.baseHP >= this.maxBaseHP) {
+      this.showMessage('A fortaleza já está com a vida cheia.');
+      return;
+    }
+
+    let note: string;
+
+    if (this.lifeCharges > 0) {
+      this.lifeCharges--;
+      note = `+10 de vida! Usos grátis restantes: ${this.lifeCharges}.`;
+    } else if (this.diamonds >= DIAMOND_COST.life) {
+      this.diamonds -= DIAMOND_COST.life;
+      this.saveDia();
+      note = `+10 de vida! Gastou ◆${DIAMOND_COST.life}.`;
+    } else {
+      this.showMessage(
+        `Acabaram os 3 usos grátis. Cada +10 custa ◆${DIAMOND_COST.life} e você tem ◆${this.diamonds}.`,
+      );
+      return;
+    }
+
+    this.baseHP = Math.min(this.maxBaseHP, this.baseHP + 10);
+    SFX.play('upgrade');
+    this.floatText(300, 160, '+10 ♥', '#ff9a9a', 18);
+    this.showMessage(note);
     this.refreshInterface();
   }
 
@@ -4477,7 +4964,7 @@ class GameScene extends BaseScene {
 
     // Placas dos recursos
     this.drawBarPlate(ui, 8, 44, 112, 20);
-    this.drawBarPlate(ui, 128, 44, 232, 20);
+    this.drawBarPlate(ui, 128, 44, 192, 20);
     this.drawBarPlate(ui, 368, 44, 224, 20);
     this.drawBarPlate(ui, 8, 70, 290, 20);
     this.drawBarPlate(ui, 306, 70, 244, 20);
@@ -4545,7 +5032,7 @@ class GameScene extends BaseScene {
       strokeThickness: 3,
     };
 
-    this.baseText = this.add.text(244, 54, '', barStyle)
+    this.baseText = this.add.text(224, 54, '', barStyle)
       .setOrigin(0.5).setDepth(22);
 
     this.enemyText = this.add.text(480, 54, '', {
@@ -4584,6 +5071,11 @@ class GameScene extends BaseScene {
       404, 104, 'INICIAR ONDAS  +', '#8a3a2c',
       () => this.startWave(), 12, 188, 36,
     );
+
+    this.makeButton(
+      324, 44, '+10♥', '#8a2c3c',
+      () => this.buyLife(), 11, 40, 20,
+    ).setDepth(22);
 
     this.makeButton(
       388, 5, 'MENU', '#3a4a5a',
@@ -4740,9 +5232,9 @@ class GameScene extends BaseScene {
 
     const panel = add(this.add.graphics().setDepth(61));
 
-    this.drawPanelFrame(panel, 90, 300, 420, 420);
+    this.drawPanelFrame(panel, 90, 230, 420, 560);
 
-    add(this.add.text(300, 336, 'MENU · JOGO PAUSADO', {
+    add(this.add.text(300, 266, 'MENU · JOGO PAUSADO', {
       fontFamily: 'Georgia, serif',
       fontSize: '20px',
       color: '#f0d58a',
@@ -4761,19 +5253,60 @@ class GameScene extends BaseScene {
       const text = () => `${label}: ${SFX.prefs[key] ? 'LIGADO' : 'DESLIGADO'}`;
 
       const b = add(this.makeButton(
-        130, 370 + i * 62, text(), '#3a4a5a',
+        130, 296 + i * 58, text(), '#3a4a5a',
         () => {
           SFX.setPref(key, !SFX.prefs[key]);
           this.setButtonLabel(b, text());
         },
-        15, 340, 48,
+        15, 340, 46,
       ).setDepth(63));
     });
+
+    const note = add(this.add.text(300, 484, 'Ao salvar durante uma onda, ela recomeça ao continuar.', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '11px',
+      color: '#cfc3a0',
+    }).setOrigin(0.5).setDepth(62));
+
+    const saveBtn = add(this.makeButton(
+      130, 504, 'SALVAR JOGO', '#2f6a8a',
+      () => {
+        const err = this.saveGame();
+
+        if (err) {
+          note.setText(err).setColor('#ff9a8a');
+          return;
+        }
+
+        this.setButtonLabel(saveBtn, 'SALVO ✓');
+        note.setText('Progresso salvo neste navegador.').setColor('#9fe8a0');
+      },
+      16, 340, 48,
+    ).setDepth(63));
+
+    add(this.makeButton(
+      130, 562, 'SALVAR E SAIR', '#2f5a7a',
+      () => {
+        const err = this.saveGame();
+
+        if (err) {
+          note.setText(err).setColor('#ff9a8a');
+          return;
+        }
+
+        try { window.speechSynthesis.cancel(); } catch { /* ignora */ }
+
+        this.menuOpen = false;
+        this.modalOpen = false;
+        this.scene.start('TitleScene');
+      },
+      16, 340, 48,
+    ).setDepth(63));
 
     let armed = false;
 
     const restart = add(this.makeButton(
-      130, 566, 'REINICIAR PARTIDA', '#8a3a2c',
+      130, 620, 'REINICIAR PARTIDA', '#8a3a2c',
       () => {
         if (!armed) {
           armed = true;
@@ -4791,7 +5324,7 @@ class GameScene extends BaseScene {
     ).setDepth(63));
 
     add(this.makeButton(
-      130, 630, 'CONTINUAR', '#3a6a3a',
+      130, 692, 'CONTINUAR', '#3a6a3a',
       () => this.closeGameMenu(), 16, 340, 48,
     ).setDepth(63));
   }
@@ -4974,12 +5507,13 @@ class GameScene extends BaseScene {
       g.fillStyle(0xfff0a0, 1);
       g.fillCircle(0, 0, 4);
     } else if (skill === 'repair') {
-      g.fillStyle(0x0c2b16, 1);
-      g.fillRect(-5, -12, 10, 24);
-      g.fillRect(-12, -5, 24, 10);
-      g.fillStyle(0x6fe08f, 1);
-      g.fillRect(-3, -10, 6, 20);
-      g.fillRect(-10, -3, 20, 6);
+      // pata de aliado
+      g.fillStyle(0x3a2a14, 1);
+      g.fillEllipse(0, 5, 18, 14);
+      for (const [px, py] of [[-9, -4], [-3, -9], [3, -9], [9, -4]]) g.fillCircle(px, py, 4);
+      g.fillStyle(0xffe0a0, 1);
+      g.fillEllipse(0, 5, 14, 10);
+      for (const [px, py] of [[-9, -4], [-3, -9], [3, -9], [9, -4]]) g.fillCircle(px, py, 2.6);
     } else if (skill === 'strike') {
       g.lineStyle(5, 0x4a5258, 1);
       g.lineBetween(-8, 8, 10, -10);
@@ -5157,7 +5691,7 @@ class GameScene extends BaseScene {
 
       const description = this.add.text(
         x, 930,
-        `${skill === 'strike' && !this.ultAllowed() ? 'BLOQUEADO · ◆' + DIAMOND_COST.ult : info.mana > 0 ? info.mana + ' mana' : 'PASSIVA'}\n${info.description}`,
+        `${skill === 'strike' && !this.ultAllowed() ? 'SEM USOS · ◆' + DIAMOND_COST.cast : info.mana > 0 ? info.mana + ' mana' : 'PASSIVA'}\n${info.description}${skill === 'repair' ? ' Grátis: ' + this.petCharges + '/3.' : skill === 'strike' && !this.ultUnlocked ? ' Grátis: ' + this.ultCharges + '/3.' : ''}`,
         {
           fontFamily: 'Arial, sans-serif',
           fontSize: '8px',
@@ -5288,7 +5822,7 @@ class GameScene extends BaseScene {
         ? `LIBERAR NV.6 · ◆${DIAMOND_COST.tower}`
         : tower.level >= maxLv ? 'NÍVEL MÁXIMO' : `MELHORAR · ${upgradeCost}`,
       needDia ? '#3a5aa0' : tower.level >= maxLv ? '#2b302b' : '#69502e',
-      () => (needDia ? this.openDiamondShop() : this.upgradeTower(tower)),
+      () => (needDia ? this.tryLv6(tower.kind) : this.upgradeTower(tower)),
       185, 28,
     );
 
@@ -5627,7 +6161,7 @@ class GameScene extends BaseScene {
     }
 
     if (tower.level >= 5 && !this.lv6[tower.kind]) {
-      this.showMessage('O nível 6 exige diamantes: libere na loja de diamantes.');
+      this.showMessage('Você não tem diamantes disponíveis para o nível 6.');
       return;
     }
 
@@ -5747,6 +6281,11 @@ class GameScene extends BaseScene {
     let next = this.wave + 1;
 
     if (next > MAX_WAVES) {
+      if (this.finalChoice === 'tech' && this.techSnap) {
+        this.openTechChoice();
+        return;
+      }
+
       this.showMessage('Todas as 100 ondas já foram iniciadas.');
       return;
     }
@@ -7233,154 +7772,10 @@ class GameScene extends BaseScene {
     if (text) this.speak(this.heroVisual, text, this.heroKind, true);
   }
 
-  // Balão de fala + boca mexendo (+ voz, se pedido).
-  private speak(v: Phaser.GameObjects.Container, text: string, kind: HeroKind, voice: boolean) {
-    if (!v.active) return;
-
-    v.setData('talk', this.time.now + Math.max(900, text.length * 75));
-    this.floatText(v.x, v.y - 60, text, '#fff0c0', 11);
-
-    if (voice) {
-      const l = HERO_LINES[kind];
-      SFX.say(text, l.pitch, l.rate);
-    }
-  }
-
-  // Rosto vivo e poses de tempos em tempos: ninguém fica estátua.
   private tickPoses() {
-    const now = this.time.now;
+    if (!this.heroDead) this.lifeTick(this.heroVisual, this.heroKind, true);
 
-    const act = (v: Phaser.GameObjects.Container, kind: HeroKind, isHero: boolean) => {
-      this.tickFace(v, now);
-
-      const nx = v.getData('nextIdle') as number | undefined;
-
-      if (nx === undefined) {
-        v.setData('nextIdle', now + 3000 + Math.random() * 5000);
-        return;
-      }
-
-      if (now < nx || !v.visible || v.getData('moving')) return;
-
-      v.setData('nextIdle', now + 6000 + Math.random() * 6000);
-      this.doPose(v, kind, isHero);
-    };
-
-    if (!this.heroDead) act(this.heroVisual, this.heroKind, true);
-
-    for (const c of this.companions) act(c.visual, c.kind, false);
-  }
-
-  private doPose(v: Phaser.GameObjects.Container, kind: HeroKind, isHero: boolean) {
-    const fl = v.scaleX < 0 ? -1 : 1;
-    const x = v.x;
-    const y = v.y;
-    const lines = HERO_LINES[kind].idle;
-
-    this.speak(v, lines[Math.floor(Math.random() * lines.length)], kind, isHero && Math.random() < 0.6);
-
-    const reset = () => {
-      if (!v.active) return;
-      v.setAngle(0);
-      v.setScale(fl, 1);
-    };
-
-    if (kind === 'guardiao') {
-      this.emote(v, 'angry', 900);
-
-      this.tweens.add({
-        targets: v, angle: fl * -16, scaleY: 0.92, duration: 200,
-        onComplete: () => {
-          if (!v.active) return;
-
-          SFX.play('slash');
-
-          const arc = this.add.graphics().setDepth(12);
-
-          arc.lineStyle(5, 0xfff2c0, 0.9);
-          arc.beginPath();
-          arc.arc(0, 0, 34, -1.0, 1.0, false);
-          arc.strokePath();
-          arc.setPosition(x + fl * 20, y - 8);
-          arc.setRotation(fl > 0 ? -0.6 : Math.PI + 0.6);
-          arc.setScale(0.7);
-
-          this.tweens.add({
-            targets: arc, scale: 1.2, alpha: 0, duration: 220,
-            onComplete: () => arc.destroy(),
-          });
-
-          this.tweens.add({
-            targets: v, angle: fl * 30, scaleY: 1.06, duration: 110,
-            yoyo: true, hold: 120, onComplete: reset,
-          });
-        },
-      });
-    } else if (kind === 'patrulheiro') {
-      this.emote(v, 'angry', 800);
-
-      this.tweens.add({
-        targets: v, angle: fl * -10, duration: 220,
-        onComplete: () => {
-          if (!v.active) return;
-
-          SFX.play('arrow');
-
-          const arrow = this.add.graphics().setDepth(12);
-
-          arrow.lineStyle(2, 0x8b5a2b, 1);
-          arrow.lineBetween(-9, 0, 7, 0);
-          arrow.fillStyle(0xd8e0e8, 1);
-          arrow.fillTriangle(7, -3, 7, 3, 14, 0);
-          arrow.setPosition(x, y - 14).setRotation(-Math.PI / 2 + fl * 0.3);
-
-          this.tweens.add({
-            targets: arrow, x: x + fl * 40, y: y - 130, alpha: 0, duration: 480,
-            onComplete: () => arrow.destroy(),
-          });
-
-          this.tweens.add({
-            targets: v, angle: fl * 6, duration: 90, yoyo: true, onComplete: reset,
-          });
-        },
-      });
-    } else {
-      this.emote(v, 'happy', 1100);
-      SFX.play('orb');
-
-      const ring = this.add.circle(x, y - 22, 10, 0xb070ff, 0.3)
-        .setStrokeStyle(2, 0xd0a0ff, 0.9)
-        .setBlendMode(Phaser.BlendModes.ADD)
-        .setDepth(12);
-
-      this.tweens.add({
-        targets: ring, scale: 3.4, alpha: 0, duration: 600,
-        onComplete: () => ring.destroy(),
-      });
-
-      for (let k = 0; k < 6; k++) {
-        const sp = this.add.circle(x + (k - 2.5) * 6, y - 10, 2, 0xe6d7ff, 1).setDepth(12);
-
-        this.tweens.add({
-          targets: sp, y: y - 55 - (k % 3) * 8, alpha: 0, duration: 700 + k * 40,
-          onComplete: () => sp.destroy(),
-        });
-      }
-
-      this.tweens.add({
-        targets: v, scaleY: 1.12, duration: 160, yoyo: true, onComplete: reset,
-      });
-    }
-  }
-
-  private emote(c: Phaser.GameObjects.Container, emo: Emotion, ms = 600) {
-    if (!c.active) return;
-
-    this.setFace(c, emo);
-
-    this.time.delayedCall(ms, () => {
-      if (c.active) this.setFace(c, 'neutral');
-    });
+    for (const c of this.companions) this.lifeTick(c.visual, c.kind, false);
   }
 
   private drawHeroSelect() {
@@ -7682,7 +8077,7 @@ class GameScene extends BaseScene {
 
     if (skill === 'strike' && !this.ultAllowed()) {
       this.showMessage(
-        `Ultimate bloqueado: libere por ◆${DIAMOND_COST.ult} na loja de diamantes (painel do herói).`,
+        `Acabaram os 3 usos grátis do ultimate. Cada uso custa ◆${DIAMOND_COST.cast} e você tem ◆${this.diamonds}. Ou libere para sempre por ◆${DIAMOND_COST.ult} na loja de diamantes.`,
       );
       return;
     }
@@ -7741,7 +8136,20 @@ class GameScene extends BaseScene {
         break;
     }
 
-    if (this.mana < manaBefore || this.finalChoice === 'tech') {
+    const ok = this.mana < manaBefore || (this.finalChoice === 'tech' && skill !== 'repair');
+
+    if (ok && skill === 'strike' && this.finalChoice !== 'tech' && !this.ultUnlocked) {
+      if (this.ultCharges > 0) {
+        this.ultCharges--;
+        this.floatText(this.hero.x, this.hero.y - 84, `Usos grátis: ${this.ultCharges}/3`, '#ffe08a', 12);
+      } else {
+        this.diamonds -= DIAMOND_COST.cast;
+        this.saveDia();
+        this.floatText(this.hero.x, this.hero.y - 84, `-◆${DIAMOND_COST.cast}`, '#9fd0ff', 12);
+      }
+    }
+
+    if (ok) {
       SFX.play((skill === 'strike' ? 'ult' : skill) as SfxName);
       this.sayHero(skill);
       this.emote(this.heroVisual, skill === 'repair' ? 'happy' : 'angry', 900);
@@ -7800,24 +8208,73 @@ class GameScene extends BaseScene {
     );
   }
 
-  private useRepair(cost = 40, rank = 1) {
-    if (this.mana < cost) {
-      this.showMessage('Mana insuficiente para Reparar.');
+  // Habilidade ALIADOS: 3 usos grátis; depois só com diamantes.
+  private useRepair(cost = 40, _rank = 1) {
+    if (this.finalChoice === 'tech') {
+      this.showMessage('No Mundo Supremo os aliados não existem.');
       return;
     }
 
-    if (this.baseHP >= this.maxBaseHP) {
-      this.showMessage('A base já está com a vida máxima.');
+    if (this.mana < cost) {
+      this.showMessage('Mana insuficiente para invocar aliados.');
+      return;
+    }
+
+    const free = this.petCharges > 0;
+
+    if (!free && this.diamonds < DIAMOND_COST.cast) {
+      this.showMessage(
+        `Acabaram os 3 usos grátis. Cada invocação custa ◆${DIAMOND_COST.cast} e você tem ◆${this.diamonds}.`,
+      );
       return;
     }
 
     this.mana -= cost;
-    this.baseHP = Math.min(this.maxBaseHP, this.baseHP + 5 * (3 + rank));
 
-    this.floatText(300, 740, `+${5 * (3 + rank)} VIDA`, '#7dff9a', 14);
+    if (free) {
+      this.petCharges--;
+    } else {
+      this.diamonds -= DIAMOND_COST.cast;
+      this.saveDia();
+    }
+
+    const now = this.time.now;
+
+    (['dog', 'human', 'drone'] as AllyKind[]).forEach((kind, n) => {
+      const visual = this.createAllyVisual(kind)
+        .setDepth(kind === 'drone' ? 9 : 6);
+
+      const x = this.hero.x + (n - 1) * 40;
+      const y = this.hero.y + 22;
+
+      visual.setPosition(x, y);
+
+      this.allies.push({
+        kind,
+        visual,
+        legs: (visual.getData('legs') as Phaser.GameObjects.Rectangle[]) || [],
+        x,
+        y,
+        cooldown: 0,
+        slot: n % 2,
+        until: now + 60000,
+      });
+
+      const ring = this.add.circle(x, y, 8, 0xfff0a0, 0.4)
+        .setStrokeStyle(2, 0xffffff, 0.9)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(12);
+
+      this.tweens.add({
+        targets: ring, scale: 4, alpha: 0, duration: 500,
+        onComplete: () => ring.destroy(),
+      });
+    });
+
+    SFX.play('summon');
 
     this.showMessage(
-      `Reparo utilizado! A base recuperou até ${5 * (3 + rank)} pontos de vida.`,
+      `Aliados invocados por 1 minuto! ${free ? `Usos grátis restantes: ${this.petCharges}.` : `Gastou ◆${DIAMOND_COST.cast}.`}`,
     );
   }
 
@@ -8242,7 +8699,7 @@ class GameScene extends BaseScene {
     const shield = this.shieldUntil > this.time.now;
 
     this.drawBar(
-      g, 130, 46, 228, 16,
+      g, 130, 46, 188, 16,
       this.baseHP / this.maxBaseHP,
       shield ? 0x86d8ff : 0xe2574c,
       shield ? 0x1f5f8f : 0x7a1d18,
@@ -8269,7 +8726,7 @@ class GameScene extends BaseScene {
     this.coinText.setText(this.finalChoice === 'tech' ? '∞' : `${this.coins}`);
 
     this.baseText.setText(
-      `FORTALEZA  ${this.baseHP} / ${this.maxBaseHP}${shield ? '  ·  ESCUDO' : ''}`,
+      `${shield ? 'ESCUDO ' : 'FORTALEZA '}${this.baseHP} / ${this.maxBaseHP}`,
     );
 
     const worldLabel = this.finalChoice === 'real'
@@ -9014,9 +9471,14 @@ class GameScene extends BaseScene {
     this.modalBody = text;
     this.modalObjects.push(dim, panel, heading, text);
 
+    const n = buttons.length;
+    const bw = n >= 3 ? 146 : 220;
+    const gap = n >= 3 ? 11 : 20;
+    const x0 = 300 - (n * bw + (n - 1) * gap) / 2;
+
     buttons.forEach((b, i) => {
       const btn = this.makeButton(
-        70 + i * 240, 580, b.label, b.color, b.action, 11, 220, 36,
+        x0 + i * (bw + gap), 580, b.label, b.color, b.action, n >= 3 ? 10 : 11, bw, 36,
       );
 
       btn.setDepth(53);
@@ -9171,10 +9633,7 @@ class GameScene extends BaseScene {
     this.finalChoice = choice;
 
     if (choice === 'real') {
-      // O Mundo Real traz mais ajuda: aliados extras de todos os tipos.
-      this.spawnAllies('dog');
-      this.spawnAllies('human');
-      this.spawnAllies('drone');
+      // (sem aliados automáticos)
     } else {
       this.applyHeroStats();
       this.mana = this.maxMana;
@@ -9554,6 +10013,28 @@ class GameScene extends BaseScene {
     this.refreshInterface();
   }
 
+  private buyPetHere(k: AllyKind) {
+    let note: string;
+
+    if (this.finalChoice === 'tech') {
+      note = 'No Mundo Supremo os aliados não existem.';
+    } else if (this.petCount(k) >= 2) {
+      note = 'Você já tem 2 aliados deste tipo.';
+    } else if (this.diamonds < DIAMOND_COST.pet) {
+      note = `Você não tem diamantes disponíveis (precisa de ◆${DIAMOND_COST.pet}, tem ◆${this.diamonds}).`;
+    } else {
+      this.diamonds -= DIAMOND_COST.pet;
+      this.saveDia();
+      this.spawnAllies(k, 1);
+      SFX.play('summon');
+      note = 'Aliado comprado! Ele já está ao seu lado.';
+    }
+
+    this.openHeroPanel();
+    this.panelNote?.setText(note);
+  }
+
+  // LOJA simplificada: herói no topo, duas abas (ARMADURA / ALIADOS) e o resto embaixo.
   private openHeroPanel() {
     if (this.gameOver) return;
 
@@ -9585,6 +10066,17 @@ class GameScene extends BaseScene {
       }).setDepth(52),
     );
 
+    const button = (
+      x: number, y: number, text: string, color: string,
+      action: () => void, size: number, w: number, h: number,
+    ) => {
+      const b = this.makeButton(x, y, text, color, action, size, w, h);
+
+      b.setDepth(53);
+      keep(b);
+      return b;
+    };
+
     keep(
       this.add.rectangle(300, 500, WIDTH, HEIGHT, 0x000000, 0.7)
         .setDepth(50)
@@ -9595,9 +10087,9 @@ class GameScene extends BaseScene {
     this.drawPanelFrame(panel, 20, 60, 560, 880, 10);
 
     keep(
-      this.add.text(300, 88, `${this.heroTitle()}  ·  NÍVEL ${this.heroLevel}`, {
+      this.add.text(300, 88, `LOJA  ·  ${this.heroTitle()}  ·  NÍVEL ${this.heroLevel}`, {
         fontFamily: 'Georgia, serif',
-        fontSize: '22px',
+        fontSize: '20px',
         color: '#f0d58a',
         fontStyle: 'bold',
         stroke: '#000000',
@@ -9605,174 +10097,187 @@ class GameScene extends BaseScene {
       }).setOrigin(0.5).setDepth(52),
     );
 
-    // visual do herói
-    panel.fillStyle(0x1d2a22, 1);
-    panel.fillEllipse(115, 262, 130, 28);
+    // ---------- palco: o herói com a armadura (e o aliado em teste) ----------
+    panel.fillStyle(0x16221b, 1);
+    panel.fillRoundedRect(36, 110, 528, 180, 8);
     panel.lineStyle(1, GOLD, 0.6);
-    panel.strokeEllipse(115, 262, 130, 28);
+    panel.strokeRoundedRect(36, 110, 528, 180, 8);
+    panel.fillStyle(0x24352a, 1);
+    panel.fillEllipse(140, 268, 150, 28);
 
     keep(
       (this.fused
-        ? this.buildActiveVisual(115, 215)
-        : this.createHeroVisual(kind, 115, 215, eq)
+        ? this.buildActiveVisual(140, 232)
+        : this.createHeroVisual(kind, 140, 232, eq)
       ).setScale(3).setDepth(52),
     );
 
-    // atributos
-    const rows: [string, string][] = [
+    if (this.petPreview) {
+      const pk = this.petPreview;
+      const spots = pk === 'drone'
+        ? [{ x: 62, y: 170 }, { x: 218, y: 170 }]
+        : pk === 'human'
+          ? [{ x: 62, y: 246 }, { x: 218, y: 246 }]
+          : [{ x: 66, y: 256 }, { x: 214, y: 256 }];
+
+      for (const sp of spots) {
+        keep(this.createAllyVisual(pk).setScale(2.6).setPosition(sp.x, sp.y).setDepth(52));
+      }
+
+      label(48, 118, 'COMO FICARIA COM ALIADOS', 10, '#9fd0ff', true);
+    }
+
+    const stats: [string, string][] = [
       ['DANO', `${this.heroDamage}`],
       ['ALCANCE', `${Math.round(this.heroRange)}`],
       ['VELOCIDADE', `${Math.round(this.heroSpeed)}`],
       ['ATAQUE', `${(1000 / this.heroAttackRate).toFixed(1)}/s`],
-      ['MANA', `${this.maxMana}  (+${this.manaRegen.toFixed(1)}/s)`],
-      ['BLOQUEIO', `${this.heroBlockRadius()}`],
+      ['MANA', `${this.maxMana}`],
     ];
 
-    rows.forEach(([name, value], i) => {
-      label(230, 126 + i * 24, name, 12, '#c9a24d', true);
-      label(350, 126 + i * 24, value, 13, '#efe6cc');
+    stats.forEach(([name, value], n) => {
+      label(300, 126 + n * 30, name, 13, '#c9a24d', true);
+      label(430, 126 + n * 30, value, 14, '#efe6cc');
     });
 
-    const aura = this.auraFor(st.specialty);
+    // ---------- abas ----------
+    const armorOn = this.shopTab === 'armor';
 
-    label(
-      40, 280,
-      aura
-        ? (this.fused
-          ? `Aura Fundida Nv.${aura.rank}: +${Math.round(aura.dmg * 100 - 100)}% dano e +${Math.round(aura.spd * 100 - 100)}% velocidade em TODAS as torres.`
-          : `${st.auraName} Nv.${aura.rank}: +${Math.round(aura.dmg * 100 - 100)}% dano e +${Math.round(aura.spd * 100 - 100)}% velocidade só nas torres ${TOWER_STATS[st.specialty].name}.`)
-        : '',
-      11, '#e6dfcd',
-    ).setWordWrapWidth(520);
+    button(
+      40, 304, 'ARMADURA', armorOn ? '#8a6a22' : '#2a2f33',
+      () => { this.shopTab = 'armor'; this.openHeroPanel(); }, 14, 255, 38,
+    );
+    button(
+      305, 304, 'ALIADOS', !armorOn ? '#3a5aa0' : '#2a2f33',
+      () => { this.shopTab = 'pets'; this.openHeroPanel(); }, 14, 255, 38,
+    );
 
-    // armamento
-    label(40, 318, 'ARMAMENTO', 13, '#f0d58a', true);
     panel.lineStyle(1, GOLD, 0.6);
-    panel.lineBetween(40, 338, 560, 338);
+    panel.lineBetween(40, 352, 560, 352);
 
-    GEAR_SLOTS.forEach((slot, i) => {
-      const y = 348 + i * 92;
-      const level = eq[slot];
+    if (armorOn) {
+      label(40, 360, 'Melhore a armadura com moedas. O efeito vale para este herói.', 11, '#b9d6c0');
 
-      panel.fillStyle(0x0d1114, 0.9);
-      panel.fillRect(36, y, 528, 82);
-      panel.lineStyle(1, GOLD_DARK, 1);
-      panel.strokeRect(36, y, 528, 82);
+      GEAR_SLOTS.forEach((slot, n) => {
+        const y = 384 + n * 86;
+        const level = eq[slot];
 
-      label(
-        50, y + 8,
-        `${st.gear[i]}  ·  ${level === 0 ? 'Sem melhoria' : GEAR_TIERS[level - 1]}`,
-        14, '#f0d58a', true,
-      );
+        panel.fillStyle(0x0d1114, 0.9);
+        panel.fillRect(36, y, 528, 78);
+        panel.lineStyle(1, GOLD_DARK, 1);
+        panel.strokeRect(36, y, 528, 78);
 
-      label(50, y + 32, GEAR_EFFECT[slot], 11, '#d9d0b7');
+        label(
+          50, y + 8,
+          `${st.gear[n]}  ·  ${level === 0 ? 'sem melhoria' : GEAR_TIERS[level - 1]}`,
+          14, '#f0d58a', true,
+        );
 
-      for (let p = 0; p < 5; p++) {
-        panel.fillStyle(p < level ? GOLD_LIGHT : 0x23262a, 1);
-        panel.fillRect(50 + p * 18, y + 58, 14, 8);
-        panel.lineStyle(1, 0x000000, 1);
-        panel.strokeRect(50 + p * 18, y + 58, 14, 8);
-      }
+        label(50, y + 32, GEAR_EFFECT[slot], 11, '#d9d0b7');
 
-      const maxed = level >= 5;
-      const btn = this.makeButton(
-        384, y + 22, maxed ? 'NÍVEL MÁXIMO' : `MELHORAR · ${this.gearCost(slot, level)}`,
-        maxed ? '#2b302b' : '#8a6a22',
-        () => this.buyGear(slot),
-        11, 164, 38,
-      );
+        for (let p = 0; p < 5; p++) {
+          panel.fillStyle(p < level ? GOLD_LIGHT : 0x23262a, 1);
+          panel.fillRect(50 + p * 18, y + 56, 14, 8);
+          panel.lineStyle(1, 0x000000, 1);
+          panel.strokeRect(50 + p * 18, y + 56, 14, 8);
+        }
 
-      btn.setDepth(53);
-      keep(btn);
-    });
+        const maxed = level >= 5;
 
-    // moedas e PIX
-    label(40, 636, `MOEDAS: ${this.coins}`, 16, '#ffe08a', true);
-
-    const pix = this.makeButton(
-      40, 664, 'MOEDAS · PIX', '#1f7a5a',
-      () => this.openPixShop(), 13, 255, 40,
-    );
-
-    pix.setDepth(53);
-    keep(pix);
-
-    const dia = this.makeButton(
-      305, 664, `DIAMANTES · ◆${this.diamonds}`, '#3a5aa0',
-      () => this.openDiamondShop(), 13, 255, 40,
-    );
-
-    dia.setDepth(53);
-    keep(dia);
-
-    const skills = this.makeButton(
-      40, 718, 'HABILIDADES', '#5e4482',
-      () => {
-        this.closeModal();
-        this.openHeroMenu();
-      },
-      12, 255, 40,
-    );
-
-    skills.setDepth(53);
-    keep(skills);
-
-    const close = this.makeButton(
-      305, 718, 'FECHAR', '#3a4046',
-      () => this.closeModal(), 12, 255, 40,
-    );
-
-    close.setDepth(53);
-    keep(close);
-
-    if (this.companions.length) {
-      label(
-        40, 772,
-        `Heróis em campo: ${this.presentHeroes().map(h => HERO_STATS[h].name).join(', ')}. Escolha quem controlar nos botões à esquerda da fortaleza.`,
-        12, '#cfe8d8',
-      ).setWordWrapWidth(520);
-    } else if (this.fused) {
-      label(40, 776, 'Os três heróis estão fundidos em um só.', 11, '#f0d58a');
+        button(
+          384, y + 20, maxed ? 'NÍVEL MÁXIMO' : `MELHORAR · ${this.gearCost(slot, level)}`,
+          maxed ? '#2b302b' : '#8a6a22',
+          () => this.buyGear(slot), 11, 164, 38,
+        );
+      });
     } else {
-      label(40, 776, 'Mundo 2 libera o 2º herói em campo; Mundo 3 libera o 3º.', 11, '#b39a62');
+      label(
+        40, 360,
+        `Habilidade ALIADOS: invoca os 3 por 1 min · grátis: ${this.petCharges}/3 · depois ◆${DIAMOND_COST.cast}.`,
+        11, '#b9d6c0',
+      ).setWordWrapWidth(520);
+
+      const pets: Array<{ k: AllyKind; name: string; text: string }> = [
+        { k: 'dog', name: 'CÃO', text: 'Rápido, morde de perto.' },
+        { k: 'human', name: 'SOLDADO', text: 'Forte e resistente.' },
+        { k: 'drone', name: 'DRONE', text: 'Voa e atira de longe.' },
+      ];
+
+      pets.forEach((p, n) => {
+        const x = 36 + n * 178;
+        const y = 392;
+        const on = this.petPreview === p.k;
+
+        panel.fillStyle(0x0d1114, 0.95);
+        panel.fillRoundedRect(x, y, 170, 250, 6);
+        panel.lineStyle(on ? 3 : 1, on ? GOLD_LIGHT : GOLD_DARK, 1);
+        panel.strokeRoundedRect(x, y, 170, 250, 6);
+
+        keep(this.createAllyVisual(p.k).setScale(3).setPosition(x + 85, y + 62).setDepth(52));
+
+        label(x + 85 - 40, y + 104, p.name, 14, '#f0d58a', true);
+        label(x + 12, y + 128, p.text, 10, '#d9d0b7').setWordWrapWidth(146);
+        label(x + 12, y + 150, `Você tem ${this.petCount(p.k)}/2`, 11, '#cfe8d8');
+
+        button(
+          x + 10, y + 172, on ? 'VOLTAR' : 'VER NO HERÓI', '#3a4a5a',
+          () => {
+            this.petPreview = on ? null : p.k;
+            this.openHeroPanel();
+          },
+          11, 150, 30,
+        );
+
+        button(
+          x + 10, y + 210, `COMPRAR · ◆${DIAMOND_COST.pet}`, '#3a5aa0',
+          () => this.buyPetHere(p.k), 11, 150, 30,
+        );
+      });
     }
+
+    // ---------- recursos ----------
+    label(40, 656, `MOEDAS: ${this.coins}     DIAMANTES: ◆${this.diamonds}`, 15, '#ffe08a', true);
+
+    button(40, 686, 'COMPRAR MOEDAS · PIX', '#1f7a5a', () => this.openPixShop(), 12, 255, 38);
+    button(305, 686, 'COMPRAR DIAMANTES', '#3a5aa0', () => this.openDiamondShop(), 12, 255, 38);
 
     if (this.upgradeAvailable()) {
       const up = this.nextUpgrade() as number;
       const cost = up === 4 ? SUPREME_WORLD_COST : WORLD_INFO[up].cost;
-      const ub = this.makeButton(
-        40, 804,
-        up === 4 ? `ASCENDER AO MUNDO SUPREMO · ${cost}` : `MELHORAR O MUNDO · ${cost}`,
-        '#2d6a8a',
-        () => this.openUpgrade(up),
-        12, 520, 30,
-      );
 
-      ub.setDepth(53);
-      keep(ub);
+      button(
+        40, 736,
+        up === 4 ? `ASCENDER AO MUNDO SUPREMO · ${cost}` : `MELHORAR O MUNDO · ${cost}`,
+        '#2d6a8a', () => this.openUpgrade(up), 12, 520, 34,
+      );
     }
 
     if (this.canFuse()) {
-      const fb = this.makeButton(
-        40, 804, this.finalChoice === 'tech' ? 'ASCENDER A DEUS SUPREMO' : 'FUNDIR OS 3 HERÓIS', '#8a5a1a',
-        () => this.openFusionOffer(), 12, 520, 30,
+      button(
+        40, 736, this.finalChoice === 'tech' ? 'ASCENDER A DEUS SUPREMO' : 'FUNDIR OS 3 HERÓIS', '#8a5a1a',
+        () => this.openFusionOffer(), 12, 520, 34,
       );
+    }
 
-      fb.setDepth(53);
-      keep(fb);
+    if (this.companions.length) {
+      label(
+        40, 784,
+        `Heróis em campo: ${this.presentHeroes().map(h => HERO_STATS[h].name).join(', ')}. Troque nos botões à esquerda da fortaleza.`,
+        11, '#cfe8d8',
+      ).setWordWrapWidth(520);
     }
 
     label(
-      40, 840,
-      `Vida: ${Math.ceil(this.heroHp)}/${this.heroMaxHp}   ·   Pontos: ${this.skillPoints}   ·   XP ${this.xp} / ${this.heroLevel * 50}`,
-      12, '#d9d0b7',
+      40, 816,
+      `Vida: ${Math.ceil(this.heroHp)}/${this.heroMaxHp}   ·   Pontos de habilidade: ${this.skillPoints}   ·   XP ${this.xp}/${this.heroLevel * 50}`,
+      11, '#d9d0b7',
     );
 
-    this.panelNote = label(40, 862, '', 12, '#ff9a8a');
+    this.panelNote = label(40, 840, '', 12, '#ff9a8a');
 
     if (this.heroDead) {
-      const rv = this.makeButton(
-        40, 884, `REVIVER HERÓI · ${this.reviveCost()}`, '#8a3a2c',
+      button(
+        40, 856, `REVIVER HERÓI · ${this.reviveCost()}`, '#8a3a2c',
         () => {
           if (this.coins < this.reviveCost()) {
             this.panelNote?.setText('Moedas insuficientes para reviver.');
@@ -9781,12 +10286,11 @@ class GameScene extends BaseScene {
 
           this.reviveHero();
         },
-        13, 520, 40,
+        13, 520, 34,
       );
-
-      rv.setDepth(53);
-      keep(rv);
     }
+
+    button(40, 896, 'FECHAR', '#3a4046', () => this.closeModal(), 14, 520, 38);
   }
 
   private openPixShop() {
@@ -10406,10 +10910,6 @@ class GameScene extends BaseScene {
 
     this.heroLabel.setText(`${this.heroTitle()} · Nv. ${this.heroLevel}`);
 
-    // Ajuda extra do Mundo Real.
-    this.spawnAllies('dog');
-    this.spawnAllies('human');
-    this.spawnAllies('drone');
     this.restyleAllies();
 
     this.playTransition(
@@ -10452,12 +10952,37 @@ class GameScene extends BaseScene {
     saveDiamonds({ diamonds: this.diamonds, lv6: this.lv6, ult: this.ultUnlocked });
   }
 
+  // Nível 6: gasta diamantes direto (sem abrir a loja) ou avisa que não há.
+  private tryLv6(k: TowerKind) {
+    if (this.lv6[k]) {
+      this.showMessage('O nível 6 desta torre já está liberado.');
+      return;
+    }
+
+    if (this.diamonds < DIAMOND_COST.tower) {
+      this.showMessage(
+        `Você não tem diamantes disponíveis (precisa de ◆${DIAMOND_COST.tower}, tem ◆${this.diamonds}).`,
+      );
+      return;
+    }
+
+    this.diamonds -= DIAMOND_COST.tower;
+    this.lv6[k] = true;
+    this.saveDia();
+    this.showMessage(`Nível 6 liberado para a torre ${TOWER_STATS[k].name}! Toque na torre para melhorar.`);
+    this.closeContextMenu();
+    this.refreshInterface();
+  }
+
   private ultAllowed(): boolean {
-    return this.ultUnlocked || this.finalChoice === 'tech';
+    return this.ultUnlocked
+      || this.finalChoice === 'tech'
+      || this.ultCharges > 0
+      || this.diamonds >= DIAMOND_COST.cast;
   }
 
   private petCount(kind: AllyKind): number {
-    return this.allies.filter(a => a.kind === kind).length;
+    return this.allies.filter(a => a.kind === kind && !a.until).length;
   }
 
   private diaModal(
@@ -10764,22 +11289,14 @@ class GameScene extends BaseScene {
     this.sayHero('level');
     this.emote(this.heroVisual, 'happy', 1200);
 
-    if (level === 6) {
-      this.spawnAllies('dog');
-      this.showMessage('Nível 6! Dois cães aliados foram invocados.');
-    } else if (level === 16) {
-      this.spawnAllies('human');
-      this.showMessage('Nível 16! Dois aliados humanos foram invocados.');
-    } else if (level === 26) {
-      this.spawnAllies('drone');
-      this.showMessage('Nível 26! Dois drones foram invocados.');
-    }
+    // Aliados não surgem mais sozinhos: só pela habilidade ALIADOS ou com diamantes.
+    void level;
   }
 
   private spawnAllies(kind: AllyKind, only?: number) {
     if (this.finalChoice === 'tech') return;
 
-    const have = this.allies.filter(a => a.kind === kind).length;
+    const have = this.allies.filter(a => a.kind === kind && !a.until).length;
     const limit = only === undefined ? 2 : Math.min(2, have + only);
 
     for (let i = have; i < limit; i++) {
@@ -10985,6 +11502,26 @@ class GameScene extends BaseScene {
       drone: [{ x: -26, y: -48 }, { x: 26, y: -48 }],
     };
 
+    // Aliados invocados pela habilidade somem depois de 1 minuto.
+    if (this.allies.some(a => a.until && t > a.until)) {
+      this.allies = this.allies.filter(a => {
+        if (!a.until || t <= a.until) return true;
+
+        const poof = this.add.circle(a.x, a.y, 10, 0xffffff, 0.6)
+          .setBlendMode(Phaser.BlendModes.ADD)
+          .setDepth(12);
+
+        this.tweens.add({
+          targets: poof, scale: 3, alpha: 0, duration: 400,
+          onComplete: () => poof.destroy(),
+        });
+
+        this.killVisual(a.visual);
+
+        return false;
+      });
+    }
+
     for (const a of this.allies) {
       const cfg = ALLY_CFG[a.kind];
 
@@ -11162,32 +11699,51 @@ class GameScene extends BaseScene {
     );
   }
 
-  private victory() {
-    SFX.play('victory');
-    if (this.finalChoice === 'tech' && this.techSnap) {
-      this.openModal(
-        'VITÓRIA NO MUNDO TECNOLÓGICO',
-        'Você concluiu a onda 100 com poder supremo.\n\n' +
-        'Quer experimentar o MUNDO REAL? Você volta à onda 90 com exatamente o ' +
-        'mesmo histórico de antes da escolha (nível, moedas, torres, aliados e ' +
-        'armamento), sem custo.',
-        [
-          {
-            label: 'EXPERIMENTAR O MUNDO REAL',
-            color: '#6a4a3a',
-            action: () => this.returnToReal(),
+  // Janela do Mundo Supremo após a onda 100 (volta toda vez que tentar avançar).
+  private openTechChoice() {
+    this.openModal(
+      'VITÓRIA NO MUNDO TECNOLÓGICO',
+      'Você concluiu a onda 100 com poder supremo.\n\n' +
+      'Mas dizem que ter poder demais, soberano e sem limites, pode tirar a ' +
+      'graça da jornada. A verdadeira glória está no desafio.\n\n' +
+      'Topa então voltar para a onda 90, no MUNDO REAL, do jeito que você ' +
+      'estava antes da escolha (nível, moedas, torres, aliados e armamento), ' +
+      'sem custo?\n\n' +
+      'Ou, se preferir, continue no Mundo Supremo e refaça a onda 100.',
+      [
+        {
+          label: 'EXPERIMENTAR O MUNDO REAL',
+          color: '#6a4a3a',
+          action: () => this.returnToReal(),
+        },
+        {
+          label: 'REFAZER A ONDA 100',
+          color: '#2f5a7a',
+          action: () => {
+            this.closeModal();
+            this.wave = MAX_WAVES - 1;
+            this.refreshInterface();
+            this.showMessage('Toque em INICIAR ONDA 100 para enfrentar o chefão de novo.');
           },
-          {
-            label: 'FINALIZAR',
-            color: '#3a4046',
-            action: () => {
-              this.closeModal();
-              this.playEnding();
-            },
+        },
+        {
+          label: 'FINALIZAR',
+          color: '#3a4046',
+          action: () => {
+            this.closeModal();
+            this.playEnding();
           },
-        ],
-      );
+        },
+      ],
+    );
+  }
 
+  private victory() {
+    clearSave();
+    SFX.play('victory');
+
+    if (this.finalChoice === 'tech' && this.techSnap) {
+      this.openTechChoice();
       return;
     }
 
@@ -11552,6 +12108,9 @@ class IntroScene extends BaseScene {
     });
 
     this.tweens.add({ targets: box, alpha: 0, duration: 450, delay: 2500 });
+
+    this.time.delayedCall(350, () => SFX.play('logo'));
+    this.time.delayedCall(1500, () => SFX.play('swoosh'));
   }
 
   // ---------- vídeo de 10 segundos ----------
@@ -11560,121 +12119,110 @@ class IntroScene extends BaseScene {
 
     const W = WIDTH;
     const H = HEIGHT;
+    const alive = () => !this.finished;
+    const ADD = Phaser.BlendModes.ADD;
 
+    // céu de um dia de paz
     const sky = this.add.graphics().setDepth(1).setAlpha(0);
-    this.fillVGradient(sky, 0, 0, W, H, 0x050a1e, 0x2a1c4a, 1, 20);
-    this.tweens.add({ targets: sky, alpha: 1, duration: 450 });
+    this.fillVGradient(sky, 0, 0, W, 800, 0x5aa8ff, 0xffe6a8, 1, 20);
+    this.tweens.add({ targets: sky, alpha: 1, duration: 400 });
 
-    for (let i = 0; i < 70; i++) {
-      const star = this.add.circle(
-        (i * 173 + 31) % W, (i * 89 + 17) % 560, 1.2, 0xffffff, 0.8,
-      ).setDepth(2);
+    const sun = this.add.circle(470, 210, 46, 0xfff0a0).setDepth(2);
+    const sunGlow = this.add.circle(470, 210, 100, 0xfff0a0, 0.25).setBlendMode(ADD).setDepth(2);
 
+    const clouds: Phaser.GameObjects.Ellipse[] = [];
+
+    for (let i = 0; i < 5; i++) {
+      const c = this.add.ellipse(80 + i * 130, 120 + (i % 3) * 50, 110, 36, 0xffffff, 0.9).setDepth(3);
+
+      clouds.push(c);
       this.tweens.add({
-        targets: star, alpha: 0.2, duration: Phaser.Math.Between(500, 1400),
-        yoyo: true, repeat: -1,
+        targets: c, x: c.x + 40, duration: 3000 + i * 400, yoyo: true, repeat: -1,
       });
     }
 
-    const moonGlow = this.add.circle(460, 230, 90, 0xf6f0d8, 0.12)
-      .setBlendMode(Phaser.BlendModes.ADD).setDepth(2);
-    const moon = this.add.circle(460, 230, 44, 0xf6f0d8).setDepth(2);
+    // colinas, vila e fortaleza
+    const land = this.add.graphics().setDepth(4);
 
-    // vila
-    const ground = this.add.graphics().setDepth(3);
-    ground.fillStyle(0x06080d, 1);
-    ground.fillRect(0, 770, W, 230);
-    ground.fillEllipse(120, 780, 360, 90);
-    ground.fillEllipse(480, 790, 420, 100);
+    land.fillStyle(0x3f9a4a, 1);
+    land.fillEllipse(120, 800, 520, 200);
+    land.fillEllipse(480, 820, 560, 220);
+    land.fillStyle(0x2f7a3a, 1);
+    land.fillRect(0, 790, W, 210);
 
-    const windows: Phaser.GameObjects.Rectangle[] = [];
+    for (let i = 0; i < 6; i++) {
+      const hx = 30 + i * 100;
+      const hh = 30 + (i % 3) * 10;
+
+      land.fillStyle(0xc9a070, 1);
+      land.fillRect(hx, 745 - hh, 34, hh);
+      land.fillStyle(0x8a3a2c, 1);
+      land.fillTriangle(hx - 4, 745 - hh, hx + 38, 745 - hh, hx + 17, 745 - hh - 18);
+    }
+
+    land.fillStyle(0x9aa0aa, 1);
+    land.fillRect(250, 640, 100, 110);
+    land.fillRect(232, 610, 36, 140);
+    land.fillRect(332, 610, 36, 140);
+    land.fillStyle(0x6a707a, 1);
+    land.fillTriangle(230, 610, 270, 610, 250, 580);
+    land.fillTriangle(330, 610, 370, 610, 350, 580);
+
+    // tempestade (começa invisível)
+    const dark = this.add.rectangle(300, 500, W, H, 0x0a0c1e, 0).setDepth(6);
+    const storm: Phaser.GameObjects.Ellipse[] = [];
 
     for (let i = 0; i < 7; i++) {
-      const hx = 250 + i * 48;
-      const hh = 40 + (i % 3) * 14;
+      const c = this.add.ellipse(40 + i * 90, 90 + (i % 3) * 40, 170, 70, 0x2a2d3a, 0).setDepth(6.5);
 
-      ground.fillStyle(0x080b12, 1);
-      ground.fillRect(hx, 770 - hh, 34, hh);
-      ground.fillTriangle(hx - 4, 770 - hh, hx + 38, 770 - hh, hx + 17, 770 - hh - 20);
-
-      windows.push(
-        this.add.rectangle(hx + 17, 770 - hh / 2, 8, 9, 0xffd27a).setDepth(4),
-      );
+      storm.push(c);
     }
 
-    // portal e rachadura no céu
-    const portal = this.add.container(300, 320).setDepth(5).setAlpha(0).setScale(0.1);
-    const crack = this.add.graphics();
+    // heróis
+    const stand: Array<{ kind: HeroKind; x: number; y: number }> = [
+      { kind: 'patrulheiro', x: 130, y: 790 },
+      { kind: 'guardiao', x: 300, y: 800 },
+      { kind: 'arcanista', x: 470, y: 790 },
+    ];
 
-    crack.lineStyle(5, 0xb8f0ff, 1);
+    const heroes = stand.map(h => {
+      const v = this.createHeroVisual(h.kind, h.x, h.y)
+        .setScale(h.kind === 'guardiao' ? 3.1 : 2.6)
+        .setDepth(9)
+        .setAlpha(0);
 
-    let px = 0;
-    let py = -190;
+      v.setData('baseEmo', 'happy');
+      this.setFace(v, 'happy');
 
-    for (let i = 0; i < 9; i++) {
-      const nx = (Math.random() - 0.5) * 60;
-      const ny = py + 44;
+      this.tweens.add({ targets: v, alpha: 1, duration: 500, delay: 200 });
+      this.tweens.add({
+        targets: v, y: h.y - 4, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+      });
 
-      crack.lineBetween(px, py, nx, ny);
-      px = nx;
-      py = ny;
-    }
-
-    const halo = this.add.ellipse(0, 0, 220, 330, 0x7a4aff, 0.28)
-      .setBlendMode(Phaser.BlendModes.ADD)
-      .setStrokeStyle(4, 0x9fe8ff, 0.9);
-    const core = this.add.ellipse(0, 0, 120, 230, 0xff3a5a, 0.35)
-      .setBlendMode(Phaser.BlendModes.ADD);
-
-    portal.add([halo, core, crack]);
-    this.tweens.add({ targets: halo, scaleX: 1.12, duration: 500, yoyo: true, repeat: -1 });
-
-    // olhos vermelhos na escuridão
-    const eyes = this.add.container(0, 0).setDepth(6).setAlpha(0);
-
-    for (let i = 0; i < 16; i++) {
-      const ex = 40 + ((i * 97) % 520);
-      const ey = 600 + ((i * 53) % 150);
-
-      eyes.add([
-        this.add.circle(ex, ey, 3, 0xff3030).setBlendMode(Phaser.BlendModes.ADD),
-        this.add.circle(ex + 11, ey, 3, 0xff3030).setBlendMode(Phaser.BlendModes.ADD),
-      ]);
-    }
-
-    // herói e torres
-    const hero = this.add.container(120, 700).setDepth(7).setAlpha(0);
-    const heroGlow = this.add.circle(10, -30, 70, 0xffd36a, 0.0)
-      .setBlendMode(Phaser.BlendModes.ADD);
-    const cape = this.add.triangle(-8, -2, 0, -22, -22, 34, 8, 34, 0x0a0c12);
-    const body = this.add.rectangle(0, -2, 16, 38, 0x0a0c12);
-    const head = this.add.circle(0, -30, 9, 0x0a0c12);
-    const sword = this.add.rectangle(18, -48, 4, 62, 0xfff0b0).setRotation(0.25);
-
-    hero.add([heroGlow, cape, body, head, sword]);
-
-    const towers: Phaser.GameObjects.Container[] = [];
-
-    [300, 400, 500].forEach((tx, i) => {
-      const t = this.add.container(tx, 840).setDepth(7).setAlpha(0);
-
-      t.add([
-        this.add.rectangle(0, -26, 28, 52, 0x0a0c12),
-        this.add.triangle(0, -64, -20, 12, 20, 12, 0, -22, 0x0a0c12),
-        this.add.circle(0, -40, 4, 0xffd36a).setBlendMode(Phaser.BlendModes.ADD),
-      ]);
-      towers.push(t);
-      void i;
+      return { v, kind: h.kind };
     });
 
-    // olho gigante
-    const eye = this.add.container(300, 300).setDepth(8).setAlpha(0).setScale(1, 0.05);
+    // monstros (olhos vermelhos e silhuetas)
+    const eyes = this.add.container(0, 0).setDepth(7).setAlpha(0);
 
-    eye.add([
-      this.add.ellipse(0, 0, 420, 190, 0x14060a, 0.95).setStrokeStyle(5, 0xff3030, 1),
-      this.add.circle(0, 0, 52, 0xff2a2a, 0.95).setBlendMode(Phaser.BlendModes.ADD),
-      this.add.ellipse(0, 0, 14, 96, 0x000000, 1),
-    ]);
+    for (let i = 0; i < 18; i++) {
+      const ex = 30 + ((i * 97) % 540);
+      const ey = 660 + ((i * 53) % 90);
+
+      eyes.add([
+        this.add.circle(ex, ey, 3, 0xff3030).setBlendMode(ADD),
+        this.add.circle(ex + 11, ey, 3, 0xff3030).setBlendMode(ADD),
+      ]);
+    }
+
+    // auras douradas atrás dos heróis (aparecem quando eles se erguem)
+    const auras = heroes.map(h => {
+      const a = this.add.circle(h.v.x, h.v.y - 40, 80, 0xffd36a, 0).setBlendMode(ADD).setDepth(8.5);
+
+      this.tweens.add({ targets: a, scale: 1.25, duration: 600, yoyo: true, repeat: -1 });
+
+      return a;
+    });
 
     // faixas de cinema
     this.add.rectangle(300, 40, W, 90, 0x000000).setDepth(50);
@@ -11683,7 +12231,7 @@ class IntroScene extends BaseScene {
     const caption = (text: string, at: number, dur: number) => {
       const t = this.add.text(300, 868, text, {
         fontFamily: 'Georgia, serif',
-        fontSize: '20px',
+        fontSize: '22px',
         fontStyle: 'italic',
         color: '#fff6dc',
         align: 'center',
@@ -11693,86 +12241,126 @@ class IntroScene extends BaseScene {
       }).setOrigin(0.5).setDepth(60).setAlpha(0);
 
       this.time.delayedCall(at, () => {
-        if (this.finished) return;
+        if (!alive()) return;
         this.tweens.add({ targets: t, alpha: 1, duration: 300 });
         this.tweens.add({ targets: t, alpha: 0, duration: 300, delay: dur - 300 });
       });
     };
 
     // ----- linha do tempo (10 s) -----
-    caption('Há muito tempo, o mundo vivia em paz...', 200, 1800);
+    caption('O reino vivia em paz...', 200, 2100);
 
-    this.time.delayedCall(2000, () => {
-      if (this.finished) return;
+    this.time.delayedCall(2400, () => {
+      if (!alive()) return;
 
-      caption('Até que o céu se partiu.', 0, 2100);
-      this.cameras.main.shake(500, 0.008);
-      this.tweens.add({
-        targets: portal, alpha: 1, scale: 1.1, duration: 900, ease: 'Back.easeOut',
-      });
-      this.tweens.add({ targets: eyes, alpha: 1, duration: 900, delay: 500 });
-    });
+      caption('Até que a tempestade chegou.', 0, 2400);
+      SFX.play('thunder');
+      this.cameras.main.flash(160, 255, 255, 255);
+      this.cameras.main.shake(700, 0.01);
 
-    this.time.delayedCall(4200, () => {
-      if (this.finished) return;
+      this.tweens.add({ targets: dark, fillAlpha: 0.78, duration: 1500 });
+      this.tweens.add({ targets: [sun, sunGlow], alpha: 0, y: '+=120', duration: 1500 });
+      this.tweens.add({ targets: clouds, alpha: 0, duration: 1200 });
+      storm.forEach((c, i) => this.tweens.add({ targets: c, fillAlpha: 0.95, duration: 1200, delay: i * 80 }));
+      this.tweens.add({ targets: eyes, alpha: 1, duration: 900, delay: 600 });
 
-      caption('E algo despertou do outro lado...', 0, 2100);
-      this.cameras.main.flash(250, 255, 60, 90);
-
-      for (const w of windows) {
-        this.tweens.add({ targets: w, alpha: 0, duration: 400, delay: Phaser.Math.Between(0, 1200) });
+      for (const h of heroes) {
+        h.v.setData('baseEmo', 'surprised');
+        this.setFace(h.v, 'surprised');
       }
 
-      for (let i = 0; i < 12; i++) {
-        const m = this.add.container(-60, 700 + (i % 4) * 22).setDepth(9);
+      for (let i = 0; i < 10; i++) {
+        const left = i % 2 === 0;
+        const m = this.add.container(left ? -50 : W + 50, 690 + (i % 4) * 22).setDepth(7);
 
         m.add([
           this.add.ellipse(0, 0, 40 + (i % 3) * 8, 26, 0x05060a),
-          this.add.circle(8, -3, 2.4, 0xff3030).setBlendMode(Phaser.BlendModes.ADD),
-          this.add.circle(15, -3, 2.4, 0xff3030).setBlendMode(Phaser.BlendModes.ADD),
+          this.add.circle(-4, -3, 2.4, 0xff3030).setBlendMode(ADD),
+          this.add.circle(4, -3, 2.4, 0xff3030).setBlendMode(ADD),
         ]);
 
         this.tweens.add({
           targets: m,
-          x: W + 80,
-          duration: 1900,
-          delay: i * 140,
-          onComplete: () => m.destroy(),
+          x: left ? 90 + i * 22 : W - 90 - i * 22,
+          duration: 1800,
+          delay: 400 + i * 120,
+        });
+
+        this.time.delayedCall(5200, () => {
+          if (!alive() || !m.active) return;
+          this.tweens.add({ targets: m, alpha: 0, duration: 300, onComplete: () => m.destroy() });
         });
       }
     });
 
-    this.time.delayedCall(6400, () => {
-      if (this.finished) return;
+    this.time.delayedCall(5000, () => {
+      if (!alive()) return;
 
-      caption('Só um herói pode resistir.', 0, 2100);
-      this.tweens.add({ targets: hero, alpha: 1, duration: 500 });
-      heroGlow.setFillStyle(0xffd36a, 0.45);
-      this.tweens.add({ targets: heroGlow, scale: 1.4, duration: 700, yoyo: true, repeat: -1 });
-      this.tweens.add({ targets: sword, rotation: -0.2, duration: 600, ease: 'Back.easeOut' });
-      this.tweens.add({ targets: eyes, alpha: 0.25, duration: 600 });
+      caption('Mas três heróis se ergueram.', 0, 2300);
+      SFX.play('wave');
+      this.cameras.main.flash(200, 255, 220, 120);
 
-      towers.forEach((t, i) => {
-        t.y += 70;
-        this.tweens.add({
-          targets: t, alpha: 1, y: t.y - 70, duration: 600, delay: 300 + i * 220,
-          ease: 'Back.easeOut',
+      heroes.forEach((h, i) => {
+        h.v.setData('baseEmo', 'angry');
+        this.setFace(h.v, 'angry');
+        this.time.delayedCall(i * 350, () => {
+          if (alive()) this.doPose(h.v, h.kind, false);
         });
       });
+
+      this.tweens.add({ targets: auras, fillAlpha: 0.4, duration: 600 });
+      this.tweens.add({ targets: eyes, alpha: 0.2, duration: 700 });
+      this.tweens.add({ targets: dark, fillAlpha: 0.55, duration: 700 });
     });
 
-    this.time.delayedCall(8600, () => {
-      if (this.finished) return;
+    this.time.delayedCall(7400, () => {
+      if (!alive()) return;
 
-      caption('Mas quem observa de lá... ainda não se mostrou.', 0, 1400);
-      this.cameras.main.shake(900, 0.01);
-      this.tweens.add({ targets: sky, alpha: 0.85, duration: 600 });
-      this.tweens.add({ targets: [moon, moonGlow], alpha: 0, duration: 600 });
-      this.tweens.add({ targets: eye, alpha: 1, scaleY: 1, duration: 900, ease: 'Cubic.easeOut' });
+      SFX.play('boss');
+      this.cameras.main.shake(800, 0.014);
+      this.cameras.main.flash(250, 255, 255, 255);
+
+      const title = this.add.text(300, 440, 'TOWERCRAFT', {
+        fontFamily: 'Georgia, serif',
+        fontSize: '74px',
+        color: '#ffd97a',
+        fontStyle: 'bold',
+        stroke: '#3a2208',
+        strokeThickness: 12,
+      }).setOrigin(0.5).setDepth(70).setScale(3).setAlpha(0);
+
+      this.tweens.add({
+        targets: title, scale: 1, alpha: 1, duration: 700, ease: 'Back.easeOut',
+      });
+
+      const sub = this.add.text(300, 520, 'Defenda o reino!', {
+        fontFamily: 'Georgia, serif',
+        fontSize: '26px',
+        fontStyle: 'italic',
+        color: '#ffffff',
+        stroke: '#000000',
+        strokeThickness: 5,
+      }).setOrigin(0.5).setDepth(70).setAlpha(0);
+
+      this.tweens.add({ targets: sub, alpha: 1, duration: 600, delay: 700 });
+
+      for (let i = 0; i < 30; i++) {
+        const a = (i / 30) * Math.PI * 2;
+        const sp = this.add.circle(300, 440, 3, 0xfff0a0, 0.9).setBlendMode(ADD).setDepth(71);
+
+        this.tweens.add({
+          targets: sp,
+          x: 300 + Math.cos(a) * Phaser.Math.Between(120, 280),
+          y: 440 + Math.sin(a) * Phaser.Math.Between(80, 200),
+          alpha: 0,
+          duration: 1000,
+          onComplete: () => sp.destroy(),
+        });
+      }
     });
 
     this.time.delayedCall(9800, () => {
-      if (this.finished) return;
+      if (!alive()) return;
       this.cameras.main.flash(200, 255, 255, 255);
     });
 
@@ -11786,6 +12374,7 @@ class IntroScene extends BaseScene {
 
 class TitleScene extends BaseScene {
   private starting = false;
+  private titleHeroes: Array<{ v: Phaser.GameObjects.Container; kind: HeroKind }> = [];
 
   constructor() {
     super('TitleScene');
@@ -11793,7 +12382,12 @@ class TitleScene extends BaseScene {
 
   init() {
     this.starting = false;
+    this.titleHeroes = [];
     this.gameOver = false;
+  }
+
+  update() {
+    for (const h of this.titleHeroes) this.lifeTick(h.v, h.kind, false, true);
   }
 
   create() {
@@ -12037,6 +12631,25 @@ class TitleScene extends BaseScene {
         delay: i * 250,
         ease: 'Sine.easeInOut',
       });
+
+      // Rostos bravos, piscando e fazendo poses; ao tocar, falam e posam.
+      v.setData('baseEmo', 'angry');
+      this.setFace(v, 'angry');
+      this.titleHeroes.push({ v, kind: h.kind });
+
+      v.setInteractive(
+        new Phaser.Geom.Rectangle(-22, -42, 44, 70),
+        Phaser.Geom.Rectangle.Contains,
+      );
+      v.input!.cursor = 'pointer';
+
+      v.on('pointerdown', () => {
+        const lines = HERO_LINES[h.kind].select;
+
+        this.speak(v, lines[Math.floor(Math.random() * lines.length)], h.kind, true);
+        this.doPose(v, h.kind, false);
+        v.setData('nextIdle', this.time.now + 5000);
+      });
     });
 
     // ---------- estúdio ----------
@@ -12164,6 +12777,15 @@ class TitleScene extends BaseScene {
       () => this.openOptions(), 14, 200, 44,
     ).setDepth(12);
 
+    const sv = readSave();
+
+    if (sv) {
+      this.makeButton(
+        130, 580, `CONTINUAR JOGO · ONDA ${sv.wave}`, '#2f6a8a',
+        () => this.continueSaved(sv), 16, 340, 50,
+      ).setDepth(12);
+    }
+
     const hint = this.add.text(300, 494, 'toque para começar', {
       fontFamily: 'Georgia, serif',
       fontSize: '13px',
@@ -12186,13 +12808,6 @@ class TitleScene extends BaseScene {
       color: '#6a6a72',
     }).setOrigin(0.5).setDepth(12);
 
-    this.input.on(
-      'pointerdown',
-      (_p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
-        if (this.optObjs.length || over.length) return;
-        this.begin();
-      },
-    );
     this.input.keyboard?.once('keydown-ENTER', () => this.begin());
     this.input.keyboard?.once('keydown-SPACE', () => this.begin());
   }
@@ -12261,6 +12876,18 @@ class TitleScene extends BaseScene {
     }
 
     this.optObjs = [];
+  }
+
+  private continueSaved(sv: SaveData) {
+    if (this.starting) return;
+
+    this.starting = true;
+    this.cameras.main.fadeOut(450, 0, 0, 0);
+
+    this.time.delayedCall(470, () => this.scene.start('GameScene', {
+      heroKind: sv.heroKind,
+      save: sv,
+    }));
   }
 
   private begin() {
