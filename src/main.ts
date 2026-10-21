@@ -928,6 +928,7 @@ class GameScene extends BaseScene {
   private auraUntil = 0;
   private previewFor = -1;
   private previewText = '';
+  private healthLayer!: Phaser.GameObjects.Graphics;
 
   private coinText!: Phaser.GameObjects.Text;
   private baseText!: Phaser.GameObjects.Text;
@@ -1030,6 +1031,7 @@ class GameScene extends BaseScene {
     this.createHero();
     this.createInterface();
     this.createWorldOverlay();
+    this.healthLayer = this.add.graphics().setDepth(8);
 
     this.cursors = this.input.keyboard!.createCursorKeys();
 
@@ -1090,6 +1092,15 @@ class GameScene extends BaseScene {
   // ==================================================
   // CENÁRIO
   // ==================================================
+
+  private bake(g: Phaser.GameObjects.Graphics, key: string, depth: number) {
+    if (this.textures.exists(key)) this.textures.remove(key);
+
+    g.generateTexture(key, WIDTH, HEIGHT);
+    g.destroy();
+
+    this.add.image(0, 0, key).setOrigin(0, 0).setDepth(depth);
+  }
 
   private drawWorld() {
     this.cameras.main.setBackgroundColor('#080c09');
@@ -1195,6 +1206,9 @@ class GameScene extends BaseScene {
     ];
 
     for (const p of pads) this.drawStonePad(g, p.x, p.y);
+
+    // Cenário estático vira uma imagem única (muito mais leve)
+    this.bake(g, 'world_bg', 0);
 
     this.drawPortal();
     this.drawFortress();
@@ -1859,6 +1873,7 @@ class GameScene extends BaseScene {
     ui.lineStyle(2, GOLD, 1);
     ui.strokeCircle(572, 80, 14);
     this.drawGem(ui, 572, 62, 3, GOLD_LIGHT);
+    this.bake(ui, 'ui_top', 20);
 
     this.add.text(14, 1, 'TOWERCRAFT', {
       fontFamily: 'Georgia, serif',
@@ -1976,6 +1991,7 @@ class GameScene extends BaseScene {
     this.fillVGradient(bar, 180, 841, 405, 22, 0x3a2e18, 0x1a150b, 1, 2);
     bar.lineStyle(1, GOLD, 0.8);
     bar.lineBetween(180, 863, 585, 863);
+    this.bake(bar, 'ui_bottom', 18);
 
     this.add.text(190, 845, 'REGISTRO DE BATALHA', {
       fontFamily: 'Georgia, serif',
@@ -2848,7 +2864,7 @@ class GameScene extends BaseScene {
     this.decorateEnemy(visual, spec.kind, tier);
     visual.setScale(size);
 
-    const healthBar = this.add.graphics().setDepth(8);
+    const healthBar = this.healthLayer;
 
     const enemy: Enemy = {
       body,
@@ -2872,12 +2888,10 @@ class GameScene extends BaseScene {
     };
 
     this.enemies.push(enemy);
-    this.drawEnemyHealth(enemy);
   }
 
   private drawEnemyHealth(enemy: Enemy) {
-    const g = enemy.healthBar;
-    g.clear();
+    const g = this.healthLayer;
     if (!enemy.alive) return;
 
     const tier = enemy.tier;
@@ -2921,6 +2935,7 @@ class GameScene extends BaseScene {
 
   private updateEnemies(delta: number) {
     const heroStat = HERO_STATS[this.heroKind];
+    this.healthLayer.clear();
 
     const blockers = [
       { x: this.hero.x, y: this.hero.y, r: heroStat.blockRadius },
@@ -3017,7 +3032,6 @@ class GameScene extends BaseScene {
     enemy.alive = false;
     enemy.body.destroy();
     enemy.visual.destroy();
-    enemy.healthBar.destroy();
 
     this.enemies = this.enemies.filter(e => e !== enemy);
   }
@@ -3027,7 +3041,7 @@ class GameScene extends BaseScene {
 
     enemy.hp -= damage;
 
-    if (damage >= 5) {
+    if (damage >= 25) {
       this.floatText(
         enemy.body.x, enemy.body.y - 26, `${Math.round(damage)}`,
         '#ff9a80', 11,
@@ -3042,10 +3056,7 @@ class GameScene extends BaseScene {
       repeat: 1,
     });
 
-    if (enemy.hp > 0) {
-      this.drawEnemyHealth(enemy);
-      return;
-    }
+    if (enemy.hp > 0) return;
 
     const distance = Phaser.Math.Distance.Between(
       this.hero.x, this.hero.y,
@@ -3062,7 +3073,9 @@ class GameScene extends BaseScene {
     this.coins += reward;
 
     // Bounty de ouro estilo Dota
-    this.floatText(x, y - 22, `+${reward}`, '#ffd54a', 13);
+    if (enemy.tier !== 'normal') {
+      this.floatText(x, y - 22, `+${reward}`, '#ffd54a', 13);
+    }
 
     const burst = this.add.circle(x, y, 8, 0xe9c36a, 0.75)
       .setBlendMode(Phaser.BlendModes.ADD)
@@ -3076,9 +3089,9 @@ class GameScene extends BaseScene {
       onComplete: () => burst.destroy(),
     });
 
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 3; i++) {
       const spark = this.add.circle(x, y, 2, 0xffe08a, 1).setDepth(10);
-      const a = (Math.PI * 2 * i) / 6;
+      const a = (Math.PI * 2 * i) / 3;
 
       this.tweens.add({
         targets: spark,
@@ -3175,18 +3188,15 @@ class GameScene extends BaseScene {
       sx, sy, sniper ? 5 : 3, color,
     ).setStrokeStyle(1, 0xf4e8c8).setDepth(12);
 
-    const trail = this.add.circle(
-      sx, sy, sniper ? 11 : 7, color, 0.4,
-    ).setBlendMode(Phaser.BlendModes.ADD).setDepth(11);
-
     this.tweens.add({
-      targets: [projectile, trail],
+      targets: projectile,
       x: tx,
       y: ty,
       duration: sniper ? 180 : 120,
       onComplete: () => {
         projectile.destroy();
-        trail.destroy();
+
+        if (!sniper) return;
 
         const impact = this.add.circle(tx, ty, 4, color, 0.6)
           .setStrokeStyle(2, 0xffffff, 0.8)
@@ -3194,7 +3204,7 @@ class GameScene extends BaseScene {
 
         this.tweens.add({
           targets: impact,
-          scale: sniper ? 3 : 2,
+          scale: 3,
           alpha: 0,
           duration: 180,
           onComplete: () => impact.destroy(),
@@ -3202,17 +3212,19 @@ class GameScene extends BaseScene {
       },
     });
 
-    const flash = this.add.circle(
-      tower.body.x, tower.body.y - 22, sniper ? 9 : 6, color, 0.45,
-    ).setBlendMode(Phaser.BlendModes.ADD).setDepth(11);
+    if (sniper) {
+      const flash = this.add.circle(
+        tower.body.x, tower.body.y - 22, 9, color, 0.45,
+      ).setBlendMode(Phaser.BlendModes.ADD).setDepth(11);
 
-    this.tweens.add({
-      targets: flash,
-      alpha: 0,
-      scale: 1.7,
-      duration: 180,
-      onComplete: () => flash.destroy(),
-    });
+      this.tweens.add({
+        targets: flash,
+        alpha: 0,
+        scale: 1.7,
+        duration: 180,
+        onComplete: () => flash.destroy(),
+      });
+    }
   }
 
   private drawSelectedRange() {
