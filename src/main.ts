@@ -2580,6 +2580,15 @@ class GameScene extends BaseScene {
   private menuObjs: Phaser.GameObjects.GameObject[] = [];
   private startData: object | undefined;
   private moveTarget: { x: number; y: number } | null = null;
+  private heroDrag: { sx: number; sy: number; ox: number; oy: number; lx: number; moved: boolean } | null = null;
+  private joystickPointer: number | null = null;
+  private joystickX = 0;
+  private joystickY = 0;
+  private joystickCenter = { x: 86, y: 892 };
+  private joystickBase!: Phaser.GameObjects.Arc;
+  private joystickKnob!: Phaser.GameObjects.Arc;
+  private joystickShine!: Phaser.GameObjects.Arc;
+  private joystickLabel!: Phaser.GameObjects.Text;
   private selectGfx!: Phaser.GameObjects.Graphics;
 
   constructor() {
@@ -2670,6 +2679,10 @@ class GameScene extends BaseScene {
 
     this.heroSelected = false;
     this.moveTarget = null;
+    this.heroDrag = null;
+    this.joystickPointer = null;
+    this.joystickX = 0;
+    this.joystickY = 0;
 
     this.applyHeroStats();
     this.heroHp = this.heroMaxHp;
@@ -2730,10 +2743,59 @@ class GameScene extends BaseScene {
         return;
       }
 
+      // Herói selecionado: segurar nele e arrastar o move.
+      if (
+        this.heroSelected && !this.heroDead &&
+        Phaser.Math.Distance.Between(pointer.x, pointer.y, this.hero.x, this.hero.y) < 38
+      ) {
+        this.heroDrag = {
+          sx: pointer.x, sy: pointer.y,
+          ox: this.hero.x - pointer.x, oy: this.hero.y - pointer.y,
+          lx: pointer.x, moved: false,
+        };
+        return;
+      }
+
       this.selectElementAt(pointer.x, pointer.y);
     });
 
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (this.gameOver || this.modalOpen) return;
+
+      if (pointer.y > 825 && pointer.x < 170 && this.heroSelected) {
+        this.joystickPointer = pointer.id;
+        this.updateJoystick(pointer.x, pointer.y);
+      }
+    });
+
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (this.joystickPointer === pointer.id && pointer.isDown) {
+        this.updateJoystick(pointer.x, pointer.y);
+      }
+
+      const d = this.heroDrag;
+
+      if (d && pointer.isDown) {
+        if (!d.moved && Phaser.Math.Distance.Between(pointer.x, pointer.y, d.sx, d.sy) > 6) {
+          d.moved = true;
+        }
+
+        if (d.moved) {
+          this.hero.x = Phaser.Math.Clamp(pointer.x + d.ox, 18, WIDTH - 18);
+          this.hero.y = Phaser.Math.Clamp(pointer.y + d.oy, 175, 815);
+          this.heroVisual.setPosition(this.hero.x, this.hero.y);
+          this.heroLabel.setPosition(this.hero.x, this.hero.y - 42);
+
+          if (Math.abs(pointer.x - d.lx) > 1) {
+            this.heroVisual.setScale(pointer.x < d.lx ? -1 : 1, 1);
+          }
+
+          d.lx = pointer.x;
+        }
+
+        return;
+      }
+
       if (!this.buildMode || !this.buildDrag || !pointer.isDown) return;
 
       const dx = pointer.x - this.buildDrag.x;
@@ -2743,8 +2805,28 @@ class GameScene extends BaseScene {
       this.moveBuildGhost(dx, dy);
     });
 
-    this.input.on('pointerup', () => {
+    this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
       this.buildDrag = null;
+
+      if (this.joystickPointer === pointer.id) {
+        this.joystickPointer = null;
+        this.joystickX = 0;
+        this.joystickY = 0;
+        this.moveKnob(this.joystickCenter.x, this.joystickCenter.y);
+      }
+
+      const d = this.heroDrag;
+
+      if (d) {
+        this.heroDrag = null;
+
+        // Toque rápido no herói selecionado: solta o herói.
+        if (!d.moved && this.heroSelected) {
+          this.heroSelected = false;
+          this.closeContextMenu();
+          this.showMessage('Herói solto. Toque nele para selecionar de novo.');
+        }
+      }
     });
 
     this.showMessage(
@@ -4573,24 +4655,71 @@ class GameScene extends BaseScene {
     this.rangeGraphics = this.add.graphics().setDepth(4);
     this.buildPreview = this.add.graphics().setDepth(14).setVisible(false);
 
-    // Placa do herói (no lugar do antigo joystick): dica de controle.
-    const plate = this.add.graphics().setDepth(19);
+    // Joystick ornamentado (só funciona com o herói selecionado)
+    const jc = this.joystickCenter;
+    const decor = this.add.graphics().setDepth(19);
 
-    this.drawGem(plate, 22, 852, 4, GOLD_LIGHT);
-    this.drawGem(plate, 150, 852, 4, GOLD);
-    this.drawGem(plate, 22, 978, 4, GOLD);
-    this.drawGem(plate, 150, 978, 4, GOLD_LIGHT);
+    decor.lineStyle(2, GOLD_DARK, 1);
+    decor.strokeCircle(jc.x, jc.y, 57);
+    decor.lineStyle(1, GOLD, 0.8);
+    decor.strokeCircle(jc.x, jc.y, 54);
 
-    this.add.text(86, 915, 'TOQUE NO HERÓI\nNO MAPA PARA\nSELECIONAR.\nDEPOIS TOQUE EM\nQUALQUER LUGAR\nPARA MOVER.', {
+    for (let a = 0; a < 360; a += 15) {
+      const rad = Phaser.Math.DegToRad(a);
+
+      decor.lineStyle(1, GOLD, 0.6);
+      decor.lineBetween(
+        jc.x + Math.cos(rad) * 51, jc.y + Math.sin(rad) * 51,
+        jc.x + Math.cos(rad) * 54, jc.y + Math.sin(rad) * 54,
+      );
+    }
+
+    this.drawGem(decor, jc.x, jc.y - 56, 4, GOLD_LIGHT);
+    this.drawGem(decor, jc.x, jc.y + 56, 4, GOLD);
+    this.drawGem(decor, jc.x - 56, jc.y, 4, GOLD);
+    this.drawGem(decor, jc.x + 56, jc.y, 4, GOLD);
+
+    this.joystickBase = this.add.circle(
+      jc.x, jc.y, 46, 0x0c0f12, 0.92,
+    ).setStrokeStyle(3, GOLD).setDepth(20);
+
+    this.joystickKnob = this.add.circle(
+      jc.x, jc.y, 22, 0x6f8f62, 0.98,
+    ).setStrokeStyle(3, GOLD_LIGHT).setDepth(21);
+
+    this.joystickShine = this.add.circle(
+      jc.x - 6, jc.y - 7, 8, 0xffffff, 0.3,
+    ).setDepth(22);
+
+    this.joystickLabel = this.add.text(jc.x, 966, 'SELECIONE O HERÓI', {
       fontFamily: 'Georgia, serif',
-      fontSize: '11px',
+      fontSize: '10px',
       color: '#f0d58a',
       fontStyle: 'bold',
-      align: 'center',
-      lineSpacing: 3,
       stroke: '#0b0d10',
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(21);
+  }
+
+  private moveKnob(x: number, y: number) {
+    this.joystickKnob.setPosition(x, y);
+    this.joystickShine.setPosition(x - 6, y - 7);
+  }
+
+  private updateJoystick(x: number, y: number) {
+    const dx = x - this.joystickCenter.x;
+    const dy = y - this.joystickCenter.y;
+    const length = Math.sqrt(dx * dx + dy * dy) || 1;
+    const radius = 35;
+    const scale = Math.min(length, radius) / length;
+
+    this.moveKnob(
+      this.joystickCenter.x + dx * scale,
+      this.joystickCenter.y + dy * scale,
+    );
+
+    this.joystickX = dx * scale / radius;
+    this.joystickY = dy * scale / radius;
   }
 
   private openGameMenu() {
@@ -5186,37 +5315,25 @@ class GameScene extends BaseScene {
   }
 
   private selectElementAt(x: number, y: number) {
-    // Tocar no herói seleciona (e abre as habilidades) ou solta o herói.
+    // Tocar no herói (ainda não selecionado) seleciona e abre as habilidades.
     if (
       Phaser.Math.Distance.Between(x, y, this.hero.x, this.hero.y) < 30
     ) {
-      if (this.heroSelected && !this.heroDead) {
-        this.heroSelected = false;
-        this.moveTarget = null;
-        this.closeContextMenu();
-        this.showMessage('Herói solto. Toque nele para selecionar de novo.');
-      } else {
-        this.moveTarget = null;
-        this.openHeroMenu();
+      this.moveTarget = null;
+      this.openHeroMenu();
 
-        if (this.heroSelected) {
-          this.sayHero('select');
-          this.emote(this.heroVisual, 'happy', 1000);
-          this.showMessage('Herói selecionado: toque em qualquer lugar do mapa para mover.');
-        }
+      if (this.heroSelected) {
+        this.sayHero('select');
+        this.emote(this.heroVisual, 'happy', 1000);
+        this.showMessage('Herói selecionado: arraste-o ou use o joystick para mover.');
       }
 
       return;
     }
 
-    // Com o herói selecionado, qualquer toque no mapa é um destino.
-    if (this.heroSelected && !this.heroDead) {
-      this.moveTarget = {
-        x: Phaser.Math.Clamp(x, 18, WIDTH - 18),
-        y: Phaser.Math.Clamp(y, 175, 815),
-      };
-      return;
-    }
+    // Tocar fora do herói solta ele (não anda até o toque).
+    this.heroSelected = false;
+    this.moveTarget = null;
 
     let nearest: Tower | null = null;
     let closest = 38;
@@ -7031,6 +7148,14 @@ class GameScene extends BaseScene {
   private moveHero(delta: number) {
     if (this.heroDead) {
       this.moveTarget = null;
+      this.heroDrag = null;
+      return;
+    }
+
+    // Arrastando o herói com o dedo.
+    if (this.heroDrag?.moved) {
+      this.heroVisual.setData('moving', true);
+      this.animateLegs(this.heroLegs, this.time.now / 70, true);
       return;
     }
 
@@ -7041,6 +7166,12 @@ class GameScene extends BaseScene {
     if (this.cursors.right.isDown || this.keys.d.isDown) dx = 1;
     if (this.cursors.up.isDown || this.keys.w.isDown) dy = -1;
     if (this.cursors.down.isDown || this.keys.s.isDown) dy = 1;
+
+    // Joystick: só com o herói selecionado.
+    if (dx === 0 && dy === 0 && this.heroSelected) {
+      dx = this.joystickX;
+      dy = this.joystickY;
+    }
 
     let toTarget = Infinity;
 
@@ -7256,6 +7387,21 @@ class GameScene extends BaseScene {
   private drawHeroSelect() {
     const g = this.selectGfx;
     g.clear();
+
+    // Joystick ativo só com o herói selecionado.
+    this.joystickBase.setAlpha(this.heroSelected ? 0.92 : 0.4);
+    this.joystickKnob.setAlpha(this.heroSelected ? 0.98 : 0.4);
+
+    const label = this.heroSelected ? 'MOVER' : 'SELECIONE O HERÓI';
+
+    if (this.joystickLabel.text !== label) this.joystickLabel.setText(label);
+
+    if (!this.heroSelected && this.joystickPointer !== null) {
+      this.joystickPointer = null;
+      this.joystickX = 0;
+      this.joystickY = 0;
+      this.moveKnob(this.joystickCenter.x, this.joystickCenter.y);
+    }
 
     if (!this.heroSelected || this.heroDead) return;
 
@@ -12055,7 +12201,13 @@ class TitleScene extends BaseScene {
       color: '#6a6a72',
     }).setOrigin(0.5).setDepth(12);
 
-    this.input.once('pointerdown', () => this.begin());
+    this.input.on(
+      'pointerdown',
+      (_p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
+        if (this.optObjs.length || over.length) return;
+        this.begin();
+      },
+    );
     this.input.keyboard?.once('keydown-ENTER', () => this.begin());
     this.input.keyboard?.once('keydown-SPACE', () => this.begin());
   }
