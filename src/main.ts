@@ -674,7 +674,7 @@ class BaseScene extends Phaser.Scene {
         0, -20, -12, 10, 12, 10, 0, -12, 0x8768b8,
       ).setStrokeStyle(2, 0xd6c8fa);
 
-      const crystal = this.add.diamond(0, 0, 14, 19, 0xc8a6ff)
+      const crystal = this.add.rectangle(0, 0, 11, 11, 0xc8a6ff).setScale(1, 1.4).setAngle(45)
         .setStrokeStyle(2, 0xf1e3ff);
       const crystalGlow = this.add.circle(0, 0, 11, 0xe6d7ff, 0.35)
         .setBlendMode(Phaser.BlendModes.ADD);
@@ -940,23 +940,23 @@ class GameScene extends BaseScene {
   private buildInfoText!: Phaser.GameObjects.Text;
   private barGraphics!: Phaser.GameObjects.Graphics;
 
-  private buildButton!: Phaser.GameObjects.Container;
+  protected buildButton!: Phaser.GameObjects.Container;
   private heroButton!: Phaser.GameObjects.Container;
-  private waveButton!: Phaser.GameObjects.Container;
+  protected waveButton!: Phaser.GameObjects.Container;
 
   private rangeGraphics!: Phaser.GameObjects.Graphics;
   private buildPreview!: Phaser.GameObjects.Graphics;
 
   private contextObjects: Phaser.GameObjects.GameObject[] = [];
-  private contextPanel?: Phaser.GameObjects.Graphics;
-  private contextTitle?: Phaser.GameObjects.Text;
+  protected contextPanel?: Phaser.GameObjects.Graphics;
+  protected contextTitle?: Phaser.GameObjects.Text;
 
   private joystickPointer: number | null = null;
   private joystickX = 0;
   private joystickY = 0;
   private joystickCenter = { x: 86, y: 892 };
 
-  private joystickBase!: Phaser.GameObjects.Arc;
+  protected joystickBase!: Phaser.GameObjects.Arc;
   private joystickKnob!: Phaser.GameObjects.Arc;
   private joystickShine!: Phaser.GameObjects.Arc;
 
