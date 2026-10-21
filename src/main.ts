@@ -815,7 +815,7 @@ const HERO_STATS: Record<HeroKind, {
     specialty: 'basic',
     skill: 'explosion',
     gear: ['Espada', 'Armadura', 'Brasão'],
-    damage: 3,
+    damage: 5,
     range: 62,
     attackRate: 650,
     speed: 205,
@@ -833,7 +833,7 @@ const HERO_STATS: Record<HeroKind, {
     specialty: 'rapid',
     skill: 'clones',
     gear: ['Arco', 'Couraça de Couro', 'Aljava'],
-    damage: 2,
+    damage: 3,
     range: 150,
     attackRate: 380,
     speed: 275,
@@ -851,7 +851,7 @@ const HERO_STATS: Record<HeroKind, {
     specialty: 'sniper',
     skill: 'lightning',
     gear: ['Cajado', 'Manto Arcano', 'Grimório'],
-    damage: 5,
+    damage: 7,
     range: 135,
     attackRate: 900,
     speed: 225,
@@ -938,12 +938,14 @@ function freshEquip(): Record<HeroKind, Record<Gear, number>> {
 //  • Com servidor (recomendado): preencha PAYMENT_API com o endereço do
 //    server.js (Mercado Pago). O servidor cria a cobrança, o banco avisa
 //    quando o dinheiro cai e o jogo libera o pacote sozinho.
-//  • Sem servidor: o jogador manda o comprovante com o número do pedido;
-//    você confere no extrato e envia um CÓDIGO DE RESGATE (gerado com a
-//    mesma frase secreta abaixo). Só o código certo libera o pacote.
+//  • Sem servidor: o jogador paga e manda o comprovante; você confere no
+//    extrato e envia um CÓDIGO DE RESGATE feito na página Resgate Towercraft
+//    (com a mesma frase secreta abaixo). Cada código vale para 1 pacote,
+//    1 vez só, e não precisa de número de pedido.
 const PAYMENT_API = '';
 const REDEEM_SECRET = 'troque-esta-frase-secreta-towercraft';
 const ORDERS_KEY = 'towercraft_orders_v1';
+const USED_CODES_KEY = 'towercraft_used_codes_v1';
 const PIX_KEY = 'flavioassahi@gmail.com';
 const PIX_NAME = 'FLAVIO ASSAHI';
 const PIX_CITY = 'SAO PAULO';
@@ -1101,31 +1103,121 @@ function saveOrders(list: PixOrder[]) {
 }
 
 function newOrderCode(): string {
-  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let out = 'TC';
-  for (let i = 0; i < 8; i++) out += abc[Math.floor(Math.random() * abc.length)];
+  for (let i = 0; i < 8; i++) out += CODE_ABC[Math.floor(Math.random() * CODE_ABC.length)];
   return out;
 }
 
-// Mesmo cálculo do gerador de códigos (gerador-codigos.html).
-function redeemCode(order: string, pack: string): string {
-  const input = `${REDEEM_SECRET}|${order.toUpperCase()}|${pack}`;
-  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let out = '';
+// Código de resgate: 1 letra do pacote + 4 caracteres sorteados + 4 de
+// assinatura (ex.: C7K2M9QXT). Mesmo cálculo da página Resgate Towercraft.
+const CODE_ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const PACK_LETTER: Record<string, string> = {
+  avulso: 'A', ultimate: 'U', torres: 'T', aliados: 'L', guerreiro: 'G', completo: 'C',
+};
 
-  for (const seed of [0x811c9dc5, 0x01000193 ^ 0x5bd1e995]) {
-    let h = seed >>> 0;
-    for (let i = 0; i < input.length; i++) {
-      h ^= input.charCodeAt(i);
-      h = Math.imul(h, 0x01000193) >>> 0;
-    }
-    for (let i = 0; i < 4; i++) {
-      out += abc[h % 32];
-      h = Math.floor(h / 32);
-    }
+function codeSignature(letter: string, nonce: string): string {
+  const input = `${REDEEM_SECRET}|${letter}|${nonce}`;
+  let h = 0x811c9dc5;
+
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+
+  let out = '';
+  for (let i = 0; i < 4; i++) {
+    out += CODE_ABC[h % 32];
+    h = Math.floor(h / 32);
   }
 
   return out;
+}
+
+// Devolve o id do pacote se o código for válido, ou null.
+function checkRedeemCode(raw: string): string | null {
+  const c = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  if (c.length !== 9) return null;
+
+  const letter = c[0];
+  const pack = Object.keys(PACK_LETTER).find(k => PACK_LETTER[k] === letter);
+
+  if (!pack) return null;
+
+  return codeSignature(letter, c.slice(1, 5)) === c.slice(5) ? pack : null;
+}
+
+function loadUsedCodes(): string[] {
+  try {
+    const raw = localStorage.getItem(USED_CODES_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function markCodeUsed(code: string) {
+  try {
+    localStorage.setItem(USED_CODES_KEY, JSON.stringify([...loadUsedCodes(), code]));
+  } catch {
+    // ignora
+  }
+}
+
+// Caixa de texto por cima do jogo (funciona no celular e no StackBlitz).
+function askCode(onDone: (value: string | null) => void) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText =
+    'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.75);display:flex;' +
+    'align-items:center;justify-content:center;padding:16px;font-family:Arial,sans-serif';
+
+  const box = document.createElement('div');
+  box.style.cssText =
+    'background:#14191d;border:2px solid #c9a24d;border-radius:10px;padding:18px;' +
+    'width:100%;max-width:360px;display:flex;flex-direction:column;gap:12px;color:#efe6cc';
+
+  const title = document.createElement('div');
+  title.textContent = 'Digite o código de resgate';
+  title.style.cssText = 'font:bold 17px Georgia,serif;color:#f0d58a';
+
+  const input = document.createElement('input');
+  input.placeholder = 'Ex.: C7K2M9QXT';
+  input.autocomplete = 'off';
+  input.style.cssText =
+    'font:20px monospace;letter-spacing:3px;padding:10px;border-radius:6px;' +
+    'border:1px solid #6e5524;background:#0b0e11;color:#fff;text-transform:uppercase';
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:10px';
+
+  const mk = (label: string, bg: string) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.style.cssText =
+      `flex:1;padding:12px;border:0;border-radius:6px;font:bold 15px Arial;color:#fff;background:${bg};cursor:pointer`;
+    return b;
+  };
+
+  const cancel = mk('Cancelar', '#3a4046');
+  const ok = mk('Resgatar', '#1f7a5a');
+
+  const close = (v: string | null) => {
+    wrap.remove();
+    onDone(v);
+  };
+
+  cancel.onclick = () => close(null);
+  ok.onclick = () => close(input.value);
+  input.onkeydown = e => {
+    if (e.key === 'Enter') close(input.value);
+  };
+
+  row.append(cancel, ok);
+  box.append(title, input, row);
+  wrap.append(box);
+  document.body.append(wrap);
+  setTimeout(() => input.focus(), 50);
 }
 
 type DiamondSave = {
@@ -11525,24 +11617,23 @@ class GameScene extends BaseScene {
     return null;
   }
 
-  private redeemPrompt(): string {
-    const typed = (window.prompt('Digite o código de resgate que você recebeu:') || '')
-      .toUpperCase().replace(/[^A-Z0-9]/g, '');
+  private redeemCodeNow(raw: string): string {
+    const code = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-    if (!typed) return '';
+    if (!code) return '';
 
-    const orders = loadOrders();
-    const hit = orders.find(o => redeemCode(o.order, o.pack) === typed);
+    const packId = checkRedeemCode(code);
 
-    if (!hit) {
-      return 'Código inválido para os pedidos deste aparelho. Confira se digitou certo.';
-    }
+    if (!packId) return 'Código inválido. Confira se digitou todas as letras e números.';
 
-    const pack = DIAMOND_PACKS.find(p => p.id === hit.pack);
+    if (loadUsedCodes().includes(code)) return 'Este código já foi usado.';
 
-    saveOrders(orders.filter(o => o.order !== hit.order));
+    const pack = DIAMOND_PACKS.find(p => p.id === packId);
 
-    return pack ? this.deliverPack(pack) : 'Pacote não encontrado.';
+    if (!pack) return 'Pacote não encontrado.';
+
+    markCodeUsed(code);
+    return this.deliverPack(pack);
   }
 
   private openDiamondPix(msg = '') {
@@ -11554,7 +11645,7 @@ class GameScene extends BaseScene {
       60, 156,
       PAYMENT_API
         ? 'Escolha o pacote: o código PIX é copiado. Pague no app do banco e aguarde: assim que o banco confirmar, os itens entram sozinhos.'
-        : 'Escolha o pacote: o código PIX é copiado. Pague no app do banco e envie o comprovante com o número do pedido. Você recebe um código de resgate que libera os itens.',
+        : 'Escolha o pacote: o código PIX é copiado. Pague no app do banco e envie o comprovante. Você recebe um código de resgate que libera os itens.',
       11, '#efe6cc',
     );
 
@@ -11586,10 +11677,14 @@ class GameScene extends BaseScene {
           return;
         }
 
-        const res = this.redeemPrompt();
+        askCode(value => {
+          if (value === null) return;
 
-        if (res.startsWith('Pacote')) this.openDiamondShop(res);
-        else if (res) note.setColor('#ffb0a0').setText(res);
+          const res = this.redeemCodeNow(value);
+
+          if (res.startsWith('Pacote')) this.openDiamondShop(res);
+          else if (res && note.active) note.setColor('#ffb0a0').setText(res);
+        });
       },
       480, 44, 12,
     );
@@ -11658,13 +11753,10 @@ class GameScene extends BaseScene {
       return;
     }
 
-    const order = newOrderCode();
-    saveOrders([...loadOrders(), { order, pack: p.id, at: Date.now() }]);
-
     copy(
-      buildPixPayload(p.value, order),
-      `PEDIDO: ${order} · ${p.title} (${p.label})\n` +
-      `Depois de pagar, envie o comprovante e o número do pedido para ${PIX_KEY}. ` +
+      buildPixPayload(p.value),
+      `Pacote ${p.title} (${p.label}).\n` +
+      `Depois de pagar, envie o comprovante para ${PIX_KEY}. ` +
       'Você recebe um código de resgate; toque em TENHO UM CÓDIGO DE RESGATE.',
     );
   }
