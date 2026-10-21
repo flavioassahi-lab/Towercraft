@@ -2585,10 +2585,9 @@ class GameScene extends BaseScene {
   private joystickX = 0;
   private joystickY = 0;
   private joystickCenter = { x: 86, y: 892 };
-  private joystickBase!: Phaser.GameObjects.Arc;
+  protected joystickBase!: Phaser.GameObjects.Arc;
   private joystickKnob!: Phaser.GameObjects.Arc;
   private joystickShine!: Phaser.GameObjects.Arc;
-  private joystickLabel!: Phaser.GameObjects.Text;
   private selectGfx!: Phaser.GameObjects.Graphics;
 
   constructor() {
@@ -2762,7 +2761,7 @@ class GameScene extends BaseScene {
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (this.gameOver || this.modalOpen) return;
 
-      if (pointer.y > 825 && pointer.x < 170 && this.heroSelected) {
+      if (pointer.y > 825 && pointer.x < 170) {
         this.joystickPointer = pointer.id;
         this.updateJoystick(pointer.x, pointer.y);
       }
@@ -4691,7 +4690,7 @@ class GameScene extends BaseScene {
       jc.x - 6, jc.y - 7, 8, 0xffffff, 0.3,
     ).setDepth(22);
 
-    this.joystickLabel = this.add.text(jc.x, 966, 'SELECIONE O HERÓI', {
+    this.add.text(jc.x, 966, 'MOVER', {
       fontFamily: 'Georgia, serif',
       fontSize: '10px',
       color: '#f0d58a',
@@ -7168,7 +7167,7 @@ class GameScene extends BaseScene {
     if (this.cursors.down.isDown || this.keys.s.isDown) dy = 1;
 
     // Joystick: só com o herói selecionado.
-    if (dx === 0 && dy === 0 && this.heroSelected) {
+    if (dx === 0 && dy === 0) {
       dx = this.joystickX;
       dy = this.joystickY;
     }
@@ -7388,20 +7387,6 @@ class GameScene extends BaseScene {
     const g = this.selectGfx;
     g.clear();
 
-    // Joystick ativo só com o herói selecionado.
-    this.joystickBase.setAlpha(this.heroSelected ? 0.92 : 0.4);
-    this.joystickKnob.setAlpha(this.heroSelected ? 0.98 : 0.4);
-
-    const label = this.heroSelected ? 'MOVER' : 'SELECIONE O HERÓI';
-
-    if (this.joystickLabel.text !== label) this.joystickLabel.setText(label);
-
-    if (!this.heroSelected && this.joystickPointer !== null) {
-      this.joystickPointer = null;
-      this.joystickX = 0;
-      this.joystickY = 0;
-      this.moveKnob(this.joystickCenter.x, this.joystickCenter.y);
-    }
 
     if (!this.heroSelected || this.heroDead) return;
 
