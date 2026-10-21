@@ -13,6 +13,7 @@ type TowerKind = 'basic' | 'rapid' | 'sniper';
 type SkillKind =
   'explosion' | 'repair' | 'strike' | 'aura' | 'clones' | 'lightning';
 type Gear = 'weapon' | 'armor' | 'relic';
+type AuraBoost = { dmg: number; spd: number; rank: number } | null;
 
 const ENTRY: Point = { x: 300, y: 165 };
 const MERGE: Point = { x: 300, y: 755 };
@@ -115,7 +116,7 @@ const SKILL_INFO: Record<SkillKind, {
   },
   aura: {
     name: 'AURA',
-    description: 'Passiva: reforça torres próximas.',
+    description: 'Passiva fixa: reforça todas as torres da especialidade do herói.',
     mana: 0,
   },
   clones: {
@@ -193,7 +194,7 @@ const HERO_STATS: Record<HeroKind, {
     armor: 0x3f6f9a,
     cape: 0x8a2a2a,
     auraName: 'Aura do Guardião',
-    auraDesc: 'Passiva: torres GUARDIÃ próximas ficam mais fortes.',
+    auraDesc: 'Passiva: todas as torres GUARDIÃ ficam mais fortes.',
   },
   patrulheiro: {
     name: 'PATRULHEIRO',
@@ -211,7 +212,7 @@ const HERO_STATS: Record<HeroKind, {
     armor: 0x3d7a4a,
     cape: 0x2d4a2a,
     auraName: 'Aura do Patrulheiro',
-    auraDesc: 'Passiva: torres BESTEIRA próximas ficam mais fortes.',
+    auraDesc: 'Passiva: todas as torres BESTEIRA ficam mais fortes.',
   },
   arcanista: {
     name: 'ARCANISTA',
@@ -229,7 +230,7 @@ const HERO_STATS: Record<HeroKind, {
     armor: 0x5b3f8f,
     cape: 0x3b2a66,
     auraName: 'Aura do Arcanista',
-    auraDesc: 'Passiva: torres ARCANA próximas ficam mais fortes.',
+    auraDesc: 'Passiva: todas as torres ARCANA ficam mais fortes.',
   },
 };
 
@@ -281,7 +282,6 @@ const ELITE_WAVES = [
   5, 10, 15, 20, 25, 35, 40, 45, 50, 55, 65, 70, 75, 80, 85, 95,
 ];
 
-const AURA_RADIUS = 150;
 
 const GEAR_SLOTS: Gear[] = ['weapon', 'armor', 'relic'];
 const GEAR_TIERS = ['Ferro', 'Aço', 'Prata', 'Ouro', 'Lendário'];
@@ -412,6 +412,7 @@ type Enemy = {
   xp: number;
   resist: Record<TowerKind, number>;
   slowUntil: number;
+  flashUntil: number;
 };
 
 type Tower = {
@@ -426,7 +427,6 @@ type Tower = {
   cost: number;
   totalInvested: number;
   auraUntil: number;
-  auraRing?: Phaser.GameObjects.Arc;
 };
 
 type WaveState = {
@@ -839,10 +839,89 @@ class BaseScene extends Phaser.Scene {
     return c;
   }
 
+  protected addGearLook(
+    c: Phaser.GameObjects.Container,
+    kind: HeroKind,
+    eq: Record<Gear, number>,
+    torso: Phaser.GameObjects.Rectangle,
+  ) {
+    const st = HERO_STATS[kind];
+    const w = eq.weapon;
+    const a = eq.armor;
+    const r = eq.relic;
+    const tiers = [0x9aa3a8, 0xc3ccd2, 0xd9dde8, 0xe9c36a, 0xff9a3a];
+
+    if (a > 0) {
+      const tone = tiers[a - 1];
+      const bulk = this.add.rectangle(0, -3, 22 + a * 3, 21 + a * 1.5, st.armor)
+        .setStrokeStyle(2, tone);
+      c.addAt(bulk, c.getIndex(torso));
+
+      const pr = 6 + a * 0.9;
+      const off = 11 + a * 0.8;
+
+      c.add(this.add.circle(-off, -10, pr, tone).setStrokeStyle(2, GOLD_DARK));
+      c.add(this.add.circle(off, -10, pr, tone).setStrokeStyle(2, GOLD_DARK));
+
+      if (a >= 3) {
+        c.add(this.add.triangle(-off, -10 - pr, -3, 6, 3, 6, 0, -6, tone));
+        c.add(this.add.triangle(off, -10 - pr, -3, 6, 3, 6, 0, -6, tone));
+      }
+
+      if (a >= 5) {
+        c.add(
+          this.add.rectangle(0, -3, 12, 19, GOLD_LIGHT, 0.85)
+            .setStrokeStyle(1, GOLD_DARK),
+        );
+      }
+    }
+
+    if (w > 0) {
+      const tone = tiers[w - 1];
+
+      c.add(
+        this.add.circle(17, -12, 5 + w * 2, tone, 0.26)
+          .setBlendMode(Phaser.BlendModes.ADD),
+      );
+
+      c.add(
+        this.add.rectangle(18, -17, 2 + w * 0.7, 6 + w * 3, tone)
+          .setStrokeStyle(1, 0x20262a)
+          .setRotation(-0.4),
+      );
+
+      if (w >= 4) {
+        c.add(this.add.star(24, -26, 4, 1.5, 4, 0xffffff, 0.9));
+        c.add(this.add.star(11, -28, 4, 1, 3, 0xfff0a0, 0.9));
+      }
+    }
+
+    if (r > 0) {
+      const gems = Math.min(r, 5);
+
+      for (let i = 0; i < gems; i++) {
+        const ang = Math.PI + (Math.PI * (i + 1)) / (gems + 1);
+        const gx = Math.cos(ang) * 17;
+        const gy = -26 + Math.sin(ang) * 9;
+
+        c.add(
+          this.add.circle(gx, gy, 5, 0x8fd0ff, 0.3)
+            .setBlendMode(Phaser.BlendModes.ADD),
+        );
+        c.add(
+          this.add.rectangle(gx, gy, 5, 5, 0xbfe6ff)
+            .setAngle(45)
+            .setStrokeStyle(1, 0xffffff),
+        );
+      }
+    }
+  }
+
   protected createHeroVisual(
     kind: HeroKind,
     x: number,
     y: number,
+    eq?: Record<Gear, number>,
   ): Phaser.GameObjects.Container {
     const st = HERO_STATS[kind];
     const c = this.add.container(x, y);
@@ -984,6 +1063,8 @@ class BaseScene extends Phaser.Scene {
       c.add([staff, orbGlow, orb, hat, brim]);
     }
 
+    if (eq) this.addGearLook(c, kind, eq, torso);
+
     c.setData('legs', [leftBoot, rightBoot]);
     return c;
   }
@@ -1033,6 +1114,8 @@ class GameScene extends BaseScene {
   private heroLegs: Phaser.GameObjects.Rectangle[] = [];
   private unlockedHeroes: HeroKind[] = ['guardiao'];
   private heroSwapReadyAt = 0;
+  private frameCount = 0;
+  private auraRanks: Record<HeroKind, number> = { guardiao: 0, patrulheiro: 0, arcanista: 0 };
   private extraMana = 0;
   private maxBaseHP = 20;
   private stock: Record<TowerKind, number> = { basic: 0, rapid: 0, sniper: 0 };
@@ -1134,6 +1217,7 @@ class GameScene extends BaseScene {
     this.wave = 0;
     this.skillPoints = ex.skill;
     this.skillLevels = freshSkills();
+    this.auraRanks = { guardiao: 0, patrulheiro: 0, arcanista: 0 };
     this.shieldUntil = 0;
 
     this.heroKind = hk;
@@ -1795,7 +1879,7 @@ class GameScene extends BaseScene {
       .setStrokeStyle(0, 0x000000, 0)
       .setDepth(6);
 
-    this.heroVisual = this.createHeroVisual(this.heroKind, 300, 220)
+    this.heroVisual = this.createHeroVisual(this.heroKind, 300, 220, this.equip[this.heroKind])
       .setDepth(7);
 
     this.heroLegs = this.heroVisual.getData('legs') as Phaser.GameObjects.Rectangle[];
@@ -1858,10 +1942,8 @@ class GameScene extends BaseScene {
       const leftEye = this.add.ellipse(-6, -18, 5, 4, 0xff7a3a);
       const rightEye = this.add.ellipse(6, -18, 5, 4, 0xff7a3a);
 
-      const eyeGlowL = this.add.circle(-6, -18, 6, 0xff4a20, 0.5)
-        .setBlendMode(Phaser.BlendModes.ADD);
-      const eyeGlowR = this.add.circle(6, -18, 6, 0xff4a20, 0.5)
-        .setBlendMode(Phaser.BlendModes.ADD);
+      const eyeGlowL = this.add.circle(-6, -18, 6, 0xff4a20, 0.4);
+      const eyeGlowR = this.add.circle(6, -18, 6, 0xff4a20, 0.4);
 
       const mouth = this.add.rectangle(0, -9, 12, 3, 0x2b1d19);
 
@@ -1921,10 +2003,8 @@ class GameScene extends BaseScene {
       const eyeL = this.add.circle(-5, -16, 2.5, 0xff8a3a);
       const eyeR = this.add.circle(5, -16, 2.5, 0xff8a3a);
 
-      const eyeGlowL = this.add.circle(-5, -16, 5, 0xff4a20, 0.5)
-        .setBlendMode(Phaser.BlendModes.ADD);
-      const eyeGlowR = this.add.circle(5, -16, 5, 0xff4a20, 0.5)
-        .setBlendMode(Phaser.BlendModes.ADD);
+      const eyeGlowL = this.add.circle(-5, -16, 5, 0xff4a20, 0.4);
+      const eyeGlowR = this.add.circle(5, -16, 5, 0xff4a20, 0.4);
 
       const nose = this.add.triangle(
         0, -10, -3, -3, 3, -3, 0, 3, 0x4a4b2e,
@@ -2612,11 +2692,11 @@ class GameScene extends BaseScene {
   }
 
   private selectElementAt(x: number, y: number) {
-    // Tocar no herói abre o menu de habilidades.
+    // Tocar no herói abre o menu de habilidades (embaixo).
     if (
       Phaser.Math.Distance.Between(x, y, this.hero.x, this.hero.y) < 30
     ) {
-      this.openHeroPanel();
+      this.openHeroMenu();
       return;
     }
 
@@ -2903,8 +2983,7 @@ class GameScene extends BaseScene {
       tower.body.x, tower.body.y - 20, `+${refund}`, '#ffd54a', 14,
     );
 
-    if (tower.auraRing) this.killVisual(tower.auraRing);
-    tower.body.destroy();
+        tower.body.destroy();
     this.killVisual(tower.visual);
 
     this.towers = this.towers.filter(t => t !== tower);
@@ -3020,8 +3099,7 @@ class GameScene extends BaseScene {
       start.x, start.y, (strong ? 19 : 14) * size, 0x000000, 0,
     ).setStrokeStyle(0, 0x000000, 0).setDepth(5);
 
-    const visual = this.createEnemyVisual(start.x, start.y, strong);
-    this.decorateEnemy(visual, spec.kind, tier);
+    const visual = this.getEnemyVisual(spec.kind, tier, strong, start.x, start.y);
     visual.setScale(size);
 
     const healthBar = this.healthLayer;
@@ -3046,16 +3124,73 @@ class GameScene extends BaseScene {
       xp: tier === 'boss' ? 200 : tier === 'elite' ? 50 : 10,
       resist: type.resist,
       slowUntil: 0,
+      flashUntil: 0,
     };
 
     this.enemies.push(enemy);
   }
 
-  private drawEnemyHealth(enemy: Enemy) {
+  // Cada tipo de inimigo é desenhado uma única vez e vira uma textura.
+  // Depois, cada monstro é só uma imagem (muito mais leve que ~20 objetos).
+  private getEnemyVisual(
+    kind: EnemyKind,
+    tier: Tier,
+    strong: boolean,
+    x: number,
+    y: number,
+  ): Phaser.GameObjects.Container {
+    const key = `en_${kind}_${tier}_${strong ? 1 : 0}`;
+
+    if (!this.textures.exists(key)) {
+      const full = this.createEnemyVisual(0, 0, strong);
+      this.decorateEnemy(full, kind, tier);
+
+      try {
+        const rt = this.make.renderTexture(
+          { x: 0, y: 0, width: 128, height: 128 }, false,
+        );
+
+        rt.draw(full, 64, 64);
+        rt.saveTexture(key);
+        rt.destroy();
+        this.killVisual(full);
+      } catch {
+        // Se não for possível gerar a textura, usa o desenho completo.
+        full.setPosition(x, y);
+        return full;
+      }
+    }
+
+    const c = this.add.container(x, y).setDepth(5);
+    c.add(this.add.image(0, 0, key));
+
+    if (kind === 'espectral') c.setAlpha(0.72);
+
+    return c;
+  }
+
+  private drawEnemyHealth(enemy: Enemy, crowded: boolean) {
     const g = this.healthLayer;
     if (!enemy.alive) return;
 
     const tier = enemy.tier;
+
+    // Caminho rápido para inimigos comuns: barra simples, só se ferido.
+    if (tier === 'normal') {
+      if (enemy.hp >= enemy.maxHp && crowded) return;
+
+      const w = enemy.strong ? 40 : 30;
+      const bx = enemy.body.x - w / 2;
+      const by = enemy.body.y - (enemy.strong ? 43 : 35) * enemy.size;
+      const r = Phaser.Math.Clamp(enemy.hp / enemy.maxHp, 0, 1);
+
+      g.fillStyle(0x000000, 0.85);
+      g.fillRect(bx - 1, by - 1, w + 2, 7);
+      g.fillStyle(r > 0.5 ? 0x71d065 : r > 0.25 ? 0xe8bc48 : 0xe0523f, 1);
+      g.fillRect(bx, by, w * r, 5);
+      return;
+    }
+
     const width = tier === 'boss' ? 100 : tier === 'elite' ? 56 : (enemy.strong ? 40 : 30);
     const height = tier === 'boss' ? 8 : tier === 'elite' ? 6 : 5;
     const x = enemy.body.x - width / 2;
@@ -3084,14 +3219,12 @@ class GameScene extends BaseScene {
       g.lineBetween(sx, y, sx, y + height);
     }
 
-    const border = tier === 'boss' ? 0xff5a45 : tier === 'elite' ? GOLD_LIGHT : GOLD_DARK;
-    g.lineStyle(tier === 'normal' ? 1 : 2, border, 1);
+    const border = tier === 'boss' ? 0xff5a45 : GOLD_LIGHT;
+    g.lineStyle(2, border, 1);
     g.strokeRect(x - 1, y - 1, width + 2, height + 2);
 
-    if (tier !== 'normal') {
-      this.drawGem(g, x - 3, y + height / 2, 3, border);
-      this.drawGem(g, x + width + 3, y + height / 2, 3, border);
-    }
+    this.drawGem(g, x - 3, y + height / 2, 3, border);
+    this.drawGem(g, x + width + 3, y + height / 2, 3, border);
   }
 
   private updateEnemies(delta: number) {
@@ -3103,7 +3236,13 @@ class GameScene extends BaseScene {
       ...this.clones.map(c => ({ x: c.x, y: c.y, r: 13 })),
     ];
 
-    for (const enemy of [...this.enemies]) {
+    this.frameCount++;
+    const list = this.enemies;
+    const crowded = list.length > 30;
+    const nowMs = this.time.now;
+
+    for (let idx = 0; idx < list.length; idx++) {
+      const enemy = list[idx];
       if (!enemy.alive) continue;
 
       const target = enemy.path[enemy.segment + 1];
@@ -3132,7 +3271,7 @@ class GameScene extends BaseScene {
       const dx = target.x - enemy.body.x;
       const dy = target.y - enemy.body.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
-      const slow = enemy.slowUntil > this.time.now ? 0.55 : 1;
+      const slow = enemy.slowUntil > nowMs ? 0.55 : 1;
       const step = enemy.speed * slow * delta / 1000;
       const angle = Math.atan2(dy, dx);
 
@@ -3154,9 +3293,10 @@ class GameScene extends BaseScene {
         const rx = enemy.body.x - b.x;
         const ry = enemy.body.y - b.y;
         const minD = b.r + enemyRadius;
-        const d = Math.sqrt(rx * rx + ry * ry) || 0.01;
 
-        if (d >= minD) continue;
+        if (rx * rx + ry * ry >= minD * minD) continue;
+
+        const d = Math.sqrt(rx * rx + ry * ry) || 0.01;
 
         const nx = rx / d;
         const ny = ry / d;
@@ -3175,18 +3315,22 @@ class GameScene extends BaseScene {
 
       enemy.visual.setPosition(enemy.body.x, enemy.body.y);
 
-      const facing = (enemy.visual.getData('facing') as number) || 1;
-      const t = this.time.now / 110 + enemy.phase;
+      // Com muitos inimigos, a animação é atualizada em quadros alternados.
+      if (!crowded || ((idx + this.frameCount) & 1) === 0) {
+        const facing = (enemy.visual.getData('facing') as number) || 1;
+        const t = nowMs / 110 + enemy.phase;
 
-      enemy.visual.setScale(
-        facing * enemy.size,
-        enemy.size * (1 + Math.sin(t) * 0.04),
-      );
+        enemy.visual.setScale(
+          facing * enemy.size,
+          enemy.size * (1 + Math.sin(t) * 0.05),
+        );
 
-      const legs = enemy.visual.getData('legs') as Phaser.GameObjects.Rectangle[] | undefined;
-      if (legs) this.animateLegs(legs, t * 1.5, true);
+        const legs = enemy.visual.getData('legs') as Phaser.GameObjects.Rectangle[] | undefined;
+        if (legs) this.animateLegs(legs, t * 1.5, true);
+        else enemy.visual.y = enemy.body.y + Math.sin(t * 1.5) * 1.6;
+      }
 
-      this.drawEnemyHealth(enemy);
+      this.drawEnemyHealth(enemy, crowded);
     }
   }
 
@@ -3210,13 +3354,18 @@ class GameScene extends BaseScene {
       );
     }
 
-    this.tweens.add({
-      targets: enemy.visual,
-      alpha: 0.55,
-      duration: 55,
-      yoyo: true,
-      repeat: 1,
-    });
+    const nowT = this.time.now;
+
+    if (nowT > enemy.flashUntil && this.enemies.length < 40) {
+      enemy.flashUntil = nowT + 200;
+
+      this.tweens.add({
+        targets: enemy.visual,
+        alpha: 0.55,
+        duration: 55,
+        yoyo: true,
+      });
+    }
 
     if (enemy.hp > 0) return;
 
@@ -3239,19 +3388,23 @@ class GameScene extends BaseScene {
       this.floatText(x, y - 22, `+${reward}`, '#ffd54a', 13);
     }
 
-    const burst = this.add.circle(x, y, 8, 0xe9c36a, 0.75)
-      .setBlendMode(Phaser.BlendModes.ADD)
-      .setDepth(10);
+    const crowd = this.enemies.length;
 
-    this.tweens.add({
-      targets: burst,
-      alpha: 0,
-      scale: 2.4,
-      duration: 220,
-      onComplete: () => burst.destroy(),
-    });
+    if (crowd < 60) {
+      const burst = this.add.circle(x, y, 8, 0xe9c36a, 0.75)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(10);
 
-    for (let i = 0; i < 3; i++) {
+      this.tweens.add({
+        targets: burst,
+        alpha: 0,
+        scale: 2.4,
+        duration: 220,
+        onComplete: () => burst.destroy(),
+      });
+    }
+
+    for (let i = 0; i < (crowd < 25 ? 3 : 0); i++) {
       const spark = this.add.circle(x, y, 2, 0xffe08a, 1).setDepth(10);
       const a = (Math.PI * 2 * i) / 3;
 
@@ -3294,7 +3447,11 @@ class GameScene extends BaseScene {
 
   private updateTowers(delta: number) {
     const now = this.time.now;
-    const aura = this.auraStats();
+    const boosts: Record<TowerKind, AuraBoost> = {
+      basic: this.auraFor('basic'),
+      rapid: this.auraFor('rapid'),
+      sniper: this.auraFor('sniper'),
+    };
 
     for (const tower of this.towers) {
       tower.cooldown -= delta;
@@ -3319,7 +3476,7 @@ class GameScene extends BaseScene {
 
       if (!target) continue;
 
-      const boost = tower.auraRing ? aura : null;
+      const boost = boosts[tower.kind];
       let rate = tower.fireRate / (boost ? boost.spd : 1);
 
       // Besteira nível 5: modo metralhadora
@@ -3612,7 +3769,7 @@ class GameScene extends BaseScene {
 
     if (skill === 'aura') {
       this.showMessage(
-        `${info.name} é passiva e já está ativa (Nv.${rank}). Mantenha o herói perto das torres ${TOWER_STATS[HERO_STATS[this.heroKind].specialty].name}.`,
+        `${info.name} é passiva e já está ativa (Nv.${rank}) em todas as torres ${TOWER_STATS[HERO_STATS[this.heroKind].specialty].name}.`,
       );
       return;
     }
@@ -4033,13 +4190,6 @@ class GameScene extends BaseScene {
         .setBlendMode(Phaser.BlendModes.ADD);
       const sigil = this.add.star(0, -2, 5, 4, 8, 0xd070ff, 0.7);
       c.add([ring, sigil]);
-
-      this.tweens.add({
-        targets: sigil,
-        angle: 360,
-        duration: 2400,
-        repeat: -1,
-      });
     } else if (kind === 'pesado') {
       const plate = this.add.rectangle(0, 0, 22, 18, 0x59616a)
         .setStrokeStyle(2, 0xb0b6bb);
@@ -4052,15 +4202,6 @@ class GameScene extends BaseScene {
       const ghost = this.add.ellipse(0, -2, 30, 38, 0x80f0ff, 0.28)
         .setBlendMode(Phaser.BlendModes.ADD);
       c.add(ghost);
-      c.setAlpha(0.72);
-
-      this.tweens.add({
-        targets: ghost,
-        alpha: 0.08,
-        duration: 700,
-        yoyo: true,
-        repeat: -1,
-      });
     }
 
     if (tier === 'elite') {
@@ -4129,58 +4270,45 @@ class GameScene extends BaseScene {
     }
   }
 
-  private auraStats(): { radius: number; dmg: number; spd: number } | null {
-    const rank = this.skillLevels.aura;
-    if (rank <= 0) return null;
+  private auraRankOf(h: HeroKind): number {
+    return h === this.heroKind ? this.skillLevels.aura : this.auraRanks[h];
+  }
 
-    return {
-      radius: AURA_RADIUS + (rank - 1) * 10,
-      dmg: 1 + 0.12 * rank,
-      spd: 1 + 0.1 * rank,
-    };
+  // Aura passiva e permanente: cada herói reforça SÓ as torres da sua
+  // especialidade, em qualquer lugar do mapa.
+  private auraFor(kind: TowerKind): AuraBoost {
+    for (const h of this.unlockedHeroes) {
+      if (HERO_STATS[h].specialty !== kind) continue;
+
+      const rank = this.auraRankOf(h);
+      if (rank <= 0) return null;
+
+      return { dmg: 1 + 0.12 * rank, spd: 1 + 0.1 * rank, rank };
+    }
+
+    return null;
   }
 
   private updateAura() {
     const g = this.auraGraphics;
     g.clear();
 
-    const aura = this.auraStats();
-    const specialty = HERO_STATS[this.heroKind].specialty;
-    const now = this.time.now;
+    if (!this.towers.length) return;
+
+    const pulse = 0.55 + 0.25 * Math.sin(this.time.now / 300);
+    const boosts: Record<TowerKind, AuraBoost> = {
+      basic: this.auraFor('basic'),
+      rapid: this.auraFor('rapid'),
+      sniper: this.auraFor('sniper'),
+    };
 
     for (const t of this.towers) {
-      const on = !!aura && t.kind === specialty &&
-        Phaser.Math.Distance.Between(
-          t.body.x, t.body.y, this.hero.x, this.hero.y,
-        ) <= aura.radius;
+      if (!boosts[t.kind]) continue;
 
-      if (on && !t.auraRing) {
-        const ring = this.add.circle(t.body.x, t.body.y + 4, 30, GOLD_LIGHT, 0.18)
-          .setStrokeStyle(3, GOLD_LIGHT, 0.95)
-          .setBlendMode(Phaser.BlendModes.ADD)
-          .setDepth(3);
-
-        this.tweens.add({
-          targets: ring,
-          scale: 1.2,
-          alpha: 0.5,
-          duration: 500,
-          yoyo: true,
-          repeat: -1,
-        });
-
-        t.auraRing = ring;
-      } else if (!on && t.auraRing) {
-        this.killVisual(t.auraRing);
-        t.auraRing = undefined;
-      }
-    }
-
-    if (aura) {
-      g.fillStyle(GOLD_LIGHT, 0.035);
-      g.fillCircle(this.hero.x, this.hero.y, aura.radius);
-      g.lineStyle(2, GOLD_LIGHT, 0.25 + 0.15 * Math.sin(now / 300));
-      g.strokeCircle(this.hero.x, this.hero.y, aura.radius);
+      g.fillStyle(GOLD_LIGHT, 0.12);
+      g.fillEllipse(t.body.x, t.body.y + 14, 58, 24);
+      g.lineStyle(2, GOLD_LIGHT, pulse);
+      g.strokeEllipse(t.body.x, t.body.y + 14, 58, 24);
     }
   }
 
@@ -4218,9 +4346,13 @@ class GameScene extends BaseScene {
     const x = this.hero.x;
     const y = this.hero.y;
 
+    // Cada herói guarda o próprio nível de aura.
+    this.auraRanks[this.heroKind] = this.skillLevels.aura;
+    this.skillLevels.aura = this.auraRanks[kind];
+
     this.killVisual(this.heroVisual);
     this.heroKind = kind;
-    this.heroVisual = this.createHeroVisual(kind, x, y).setDepth(7);
+    this.heroVisual = this.createHeroVisual(kind, x, y, this.equip[kind]).setDepth(7);
     this.heroLegs = this.heroVisual.getData('legs') as Phaser.GameObjects.Rectangle[];
 
     this.applyHeroStats();
@@ -4408,7 +4540,7 @@ class GameScene extends BaseScene {
   }
 
   private fireballBlast(x: number, y: number, raw: number, main: Enemy) {
-    for (const e of [...this.enemies]) {
+    for (const e of this.enemies) {
       if (!e.alive || e === main) continue;
 
       if (Phaser.Math.Distance.Between(e.body.x, e.body.y, x, y) <= 58) {
@@ -4559,7 +4691,7 @@ class GameScene extends BaseScene {
     this.cloneUntil = this.time.now + duration;
 
     for (let i = 0; i < 2; i++) {
-      const visual = this.createHeroVisual('patrulheiro', this.hero.x, this.hero.y)
+      const visual = this.createHeroVisual('patrulheiro', this.hero.x, this.hero.y, this.equip.patrulheiro)
         .setDepth(7)
         .setAlpha(0.7);
 
@@ -4661,6 +4793,17 @@ class GameScene extends BaseScene {
     return GEAR_BASE_COST[slot] * (level + 1);
   }
 
+  private refreshHeroLook() {
+    const flip = this.heroVisual.scaleX < 0 ? -1 : 1;
+
+    this.killVisual(this.heroVisual);
+    this.heroVisual = this.createHeroVisual(
+      this.heroKind, this.hero.x, this.hero.y, this.equip[this.heroKind],
+    ).setDepth(7);
+    this.heroVisual.setScale(flip, 1);
+    this.heroLegs = this.heroVisual.getData('legs') as Phaser.GameObjects.Rectangle[];
+  }
+
   private buyGear(slot: Gear) {
     const eq = this.equip[this.heroKind];
     const level = eq[slot];
@@ -4679,6 +4822,7 @@ class GameScene extends BaseScene {
     this.coins -= cost;
     eq[slot]++;
     this.applyHeroStats();
+    this.refreshHeroLook();
 
     if (slot === 'relic') {
       this.mana = Math.min(this.maxMana, this.mana + 10);
@@ -4750,7 +4894,7 @@ class GameScene extends BaseScene {
     panel.strokeEllipse(115, 262, 130, 28);
 
     keep(
-      this.createHeroVisual(kind, 115, 215).setScale(3).setDepth(52),
+      this.createHeroVisual(kind, 115, 215, eq).setScale(3).setDepth(52),
     );
 
     // atributos
@@ -4768,13 +4912,13 @@ class GameScene extends BaseScene {
       label(350, 126 + i * 24, value, 13, '#efe6cc');
     });
 
-    const aura = this.auraStats();
+    const aura = this.auraFor(st.specialty);
 
     label(
       40, 280,
       aura
-        ? `${st.auraName} Nv.${this.skillLevels.aura}: +${Math.round(aura.dmg * 100 - 100)}% dano e +${Math.round(aura.spd * 100 - 100)}% velocidade nas torres ${TOWER_STATS[st.specialty].name} em ${aura.radius} de raio.`
-        : 'Aura passiva bloqueada: melhore AURA em Habilidades.',
+        ? `${st.auraName} Nv.${aura.rank}: +${Math.round(aura.dmg * 100 - 100)}% dano e +${Math.round(aura.spd * 100 - 100)}% velocidade em TODAS as torres ${TOWER_STATS[st.specialty].name}.`
+        : 'Aura passiva bloqueada: melhore AURA em Habilidades (clique no herói).',
       11, '#e6dfcd',
     ).setWordWrapWidth(520);
 
@@ -5146,7 +5290,7 @@ class GameScene extends BaseScene {
         const ty = target.body.y;
 
         if (a.kind === 'drone') {
-          for (const e of [...this.enemies]) {
+          for (const e of this.enemies) {
             if (!e.alive) continue;
 
             if (Phaser.Math.Distance.Between(e.body.x, e.body.y, tx, ty) <= 42) {
