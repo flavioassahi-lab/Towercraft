@@ -1706,6 +1706,9 @@ class GameScene extends BaseScene {
   private stashTowers: Tower[] = [];
   private stashAllies: Ally[] = [];
   private transToken = 0;
+  private skipGateWave = 0;
+  private selectorObjs: Phaser.GameObjects.GameObject[] = [];
+  private selectorRects: { x: number; y: number; w: number; h: number; kind: HeroKind }[] = [];
   private frameCount = 0;
   private spawnSeq = 0;
   private zones: Zone[] = [];
@@ -1795,6 +1798,9 @@ class GameScene extends BaseScene {
     this.companions = [];
     this.fused = false;
     this.techSnap = null;
+    this.skipGateWave = 0;
+    this.selectorObjs = [];
+    this.selectorRects = [];
     this.stashTowers = [];
     this.stashAllies = [];
     this.transToken++;
@@ -1876,6 +1882,17 @@ class GameScene extends BaseScene {
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (this.gameOver || this.modalOpen) return;
+
+      // Seletor de heróis, ao lado esquerdo da fortaleza.
+      const picked = this.selectorRects.find(r =>
+        pointer.x >= r.x && pointer.x <= r.x + r.w &&
+        pointer.y >= r.y && pointer.y <= r.y + r.h,
+      );
+
+      if (picked) {
+        this.swapHero(picked.kind);
+        return;
+      }
 
       // Os controles da interface e o joystick não constroem torres.
       if (pointer.y < 150 || pointer.y >= 825) return;
@@ -4654,18 +4671,12 @@ class GameScene extends BaseScene {
       return;
     }
 
-    if (next === 30 && this.worldLevel < 2) {
-      this.openWorldUnlock(2);
-      return;
-    }
+    // Portões de mundo: pode melhorar o mundo ou continuar no atual
+    // (com monstros mais rápidos) até juntar moedas.
+    const up = this.nextUpgrade();
 
-    if (next === 60 && this.worldLevel < 3) {
-      this.openWorldUnlock(3);
-      return;
-    }
-
-    if (next === 91 && this.finalChoice === null) {
-      this.openFinalChoice();
+    if (up !== null && next === this.gateWave(up) && this.skipGateWave !== next) {
+      this.openUpgrade(up);
       return;
     }
 
@@ -4738,6 +4749,7 @@ class GameScene extends BaseScene {
     const speed = (strong ? 40 : 55 + Math.min(waveId, 20))
       * ENEMY_SPEED_MULT
       * waveSpeedFactor(waveId)
+      * this.overdueSpeed(waveId)
       * type.speed
       * (tier === 'boss' ? 0.75 : tier === 'elite' ? 0.9 : 1);
 
@@ -6809,6 +6821,8 @@ class GameScene extends BaseScene {
       slot,
     });
 
+    this.rebuildHeroSelector();
+
     const ring = this.add.circle(x, y, 18, 0xfff0a0, 0.3)
       .setStrokeStyle(3, GOLD_LIGHT, 0.9)
       .setBlendMode(Phaser.BlendModes.ADD)
@@ -6927,6 +6941,101 @@ class GameScene extends BaseScene {
     }
   }
 
+  // Seletor de heróis: botões à esquerda da fortaleza.
+  private rebuildHeroSelector() {
+    for (const o of this.selectorObjs) {
+      if (o.active) this.killVisual(o);
+    }
+
+    this.selectorObjs = [];
+    this.selectorRects = [];
+
+    if (this.fused || !this.companions.length) return;
+
+    this.presentHeroes().forEach((k, i) => {
+      const x = 8 + i * 54;
+      const y = 762;
+      const w = 50;
+      const h = 58;
+      const active = k === this.heroKind;
+
+      const bg = this.add.graphics().setDepth(20);
+      bg.fillStyle(0x0b0d10, 0.85);
+      bg.fillRoundedRect(x, y, w, h, 6);
+      bg.lineStyle(active ? 3 : 1, active ? GOLD_LIGHT : 0x6a6250, 1);
+      bg.strokeRoundedRect(x, y, w, h, 6);
+
+      const v = this.createHeroVisual(k, x + w / 2, y + 30, this.equip[k])
+        .setScale(0.8)
+        .setDepth(21);
+
+      const name = this.add.text(x + w / 2, y + h - 7, HERO_STATS[k].name.slice(0, 5), {
+        fontFamily: 'Georgia, serif',
+        fontSize: '8px',
+        color: active ? '#f0d58a' : '#a8a08a',
+        fontStyle: 'bold',
+      }).setOrigin(0.5).setDepth(22);
+
+      this.selectorObjs.push(bg, v, name);
+      this.selectorRects.push({ x, y, w, h, kind: k });
+    });
+  }
+
+  // Assume o controle de um dos heróis em campo (os outros seguem lutando).
+  private swapHero(kind: HeroKind) {
+    const comp = this.companions.find(c => c.kind === kind);
+
+    if (!comp || this.fused || kind === this.heroKind) return;
+
+    if (this.heroDead) {
+      this.showMessage('Reviva o herói antes de trocar de controle.');
+      return;
+    }
+
+    const old = this.heroKind;
+    const hx = this.hero.x;
+    const hy = this.hero.y;
+
+    this.hero.setPosition(comp.x, comp.y);
+    comp.x = hx;
+    comp.y = hy;
+
+    this.killVisual(this.heroVisual);
+    this.heroKind = kind;
+    this.heroVisual = this.buildActiveVisual(this.hero.x, this.hero.y);
+    this.heroLegs = this.heroVisual.getData('legs') as Phaser.GameObjects.Rectangle[];
+
+    this.killVisual(comp.visual);
+    comp.kind = old;
+    comp.visual = this.makeCompanionVisual(old, comp.x, comp.y);
+    comp.legs = comp.visual.getData('legs') as Phaser.GameObjects.Rectangle[];
+    comp.label.setText(HERO_STATS[old].name).setPosition(comp.x, comp.y - 42);
+    this.restyleAllies();
+
+    this.applyHeroStats();
+    this.heroLabel
+      .setText(`${this.heroTitle()} · Nv. ${this.heroLevel}`)
+      .setPosition(this.hero.x, this.hero.y - 42);
+
+    const ring = this.add.circle(this.hero.x, this.hero.y, 18, 0xfff0a0, 0.3)
+      .setStrokeStyle(3, GOLD_LIGHT, 0.9)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(13);
+
+    this.tweens.add({
+      targets: ring,
+      scale: 4,
+      alpha: 0,
+      duration: 500,
+      onComplete: () => ring.destroy(),
+    });
+
+    this.closeContextMenu();
+    this.rebuildHeroSelector();
+    this.showMessage(`Você controla o ${HERO_STATS[kind].name}. Toque nele para usar as habilidades.`);
+    this.refreshInterface();
+  }
+
   // ---------- fusão (Mundo Real) ----------
 
   private canFuse(): boolean {
@@ -6977,6 +7086,7 @@ class GameScene extends BaseScene {
     }
 
     this.companions = [];
+    this.rebuildHeroSelector();
     this.destroyClones();
     this.fused = true;
     this.heroKind = 'guardiao';
@@ -7079,16 +7189,68 @@ class GameScene extends BaseScene {
     });
   }
 
+  private gateWave(level: number): number {
+    return level === 2 ? 30 : level === 3 ? 60 : 91;
+  }
+
+  // 2 e 3 = mundos; 4 = mundo supremo (só depois do mundo 3).
+  private nextUpgrade(): number | null {
+    if (this.worldLevel < 3) return this.worldLevel + 1;
+
+    return this.finalChoice === null ? 4 : null;
+  }
+
+  private upgradeAvailable(): boolean {
+    const up = this.nextUpgrade();
+
+    return up !== null && this.wave + 1 >= this.gateWave(up);
+  }
+
+  private atGate(level: number): boolean {
+    const next = this.wave + 1;
+
+    return next === this.gateWave(level) && this.skipGateWave !== next;
+  }
+
+  private openUpgrade(level: number) {
+    if (level === 4) this.openFinalChoice();
+    else this.openWorldUnlock(level);
+  }
+
+  private continueInWorld() {
+    this.skipGateWave = this.wave + 1;
+    this.closeModal();
+    this.showMessage(
+      'Você continua no mundo atual. Os monstros ficam mais rápidos até o upgrade (painel do herói).',
+    );
+    this.startWave();
+  }
+
+  // Quanto mais portões ignorados, mais rápidos os monstros.
+  private overdueSpeed(waveId: number): number {
+    let n = 0;
+
+    if (this.worldLevel < 2 && waveId >= 30) n++;
+    if (this.worldLevel < 3 && waveId >= 60) n++;
+    if (this.finalChoice === null && waveId >= 91) n++;
+
+    return Math.pow(1.25, n);
+  }
+
   private openWorldUnlock(level: number) {
     const info = WORLD_INFO[level];
     const nextHero = HERO_ORDER.find(h => !this.unlockedHeroes.includes(h));
     const heroName = nextHero ? HERO_STATS[nextHero].name : '—';
 
+    const gate = this.atGate(level);
+
     const body =
-      `Para avançar além da onda ${level === 2 ? 29 : 59} é preciso desbloquear este mundo.\n\n` +
       `Custo: ${info.cost} moedas  (você tem ${this.coins})\n` +
-      `Recompensa: ${heroName} entra na batalha ao seu lado (heróis em campo ao mesmo tempo).\n` +
-      'Ele luta sozinho, ao seu lado, usando as próprias habilidades de ataque.';
+      `Recompensa: ${heroName} entra na batalha (heróis em campo ao mesmo tempo).\n` +
+      'Ele luta sozinho; use os botões à esquerda da fortaleza para escolher qual herói controlar.' +
+      (gate
+        ? '\n\nSe continuar no mundo atual, os monstros ficam mais rápidos até você fazer o upgrade pelo painel do herói.'
+        : '');
 
     this.openModal(info.name, body, [
       {
@@ -7103,7 +7265,9 @@ class GameScene extends BaseScene {
           this.unlockWorld(level);
         },
       },
-      { label: 'AGORA NÃO', color: '#3a4046', action: () => this.closeModal() },
+      gate
+        ? { label: 'CONTINUAR NO MUNDO ATUAL', color: '#3a4046', action: () => this.continueInWorld() }
+        : { label: 'AGORA NÃO', color: '#3a4046', action: () => this.closeModal() },
     ]);
   }
 
@@ -7154,8 +7318,13 @@ class GameScene extends BaseScene {
   }
 
   private openFinalChoice() {
+    const gate = this.atGate(4);
+
     const body =
-      `Deseja ascender ao mundo supremo?\n\nVocê tem ${this.coins} moedas.`;
+      `Deseja ascender ao mundo supremo?\n\nVocê tem ${this.coins} moedas.` +
+      (gate
+        ? '\n\nSe continuar no mundo atual, os monstros ficam mais rápidos até você ascender pelo painel do herói.'
+        : '');
 
     this.openModal('O MUNDO SUPREMO', body, [
       {
@@ -7171,7 +7340,9 @@ class GameScene extends BaseScene {
           this.chooseFinal('tech');
         },
       },
-      { label: 'AGORA NÃO', color: '#3a4046', action: () => this.closeModal() },
+      gate
+        ? { label: 'CONTINUAR NO MUNDO ATUAL', color: '#3a4046', action: () => this.continueInWorld() }
+        : { label: 'AGORA NÃO', color: '#3a4046', action: () => this.closeModal() },
     ]);
   }
 
@@ -7530,6 +7701,7 @@ class GameScene extends BaseScene {
     this.heroVisual.setScale(flip, 1);
     this.heroVisual.setVisible(!this.heroDead);
     this.heroLegs = this.heroVisual.getData('legs') as Phaser.GameObjects.Rectangle[];
+    this.rebuildHeroSelector();
   }
 
   private buyGear(slot: Gear) {
@@ -7730,13 +7902,28 @@ class GameScene extends BaseScene {
     if (this.companions.length) {
       label(
         40, 772,
-        `Heróis em campo: ${this.presentHeroes().map(h => HERO_STATS[h].name).join(', ')}.`,
+        `Heróis em campo: ${this.presentHeroes().map(h => HERO_STATS[h].name).join(', ')}. Escolha quem controlar nos botões à esquerda da fortaleza.`,
         12, '#cfe8d8',
-      );
+      ).setWordWrapWidth(520);
     } else if (this.fused) {
       label(40, 776, 'Os três heróis estão fundidos em um só.', 11, '#f0d58a');
     } else {
       label(40, 776, 'Mundo 2 libera o 2º herói em campo; Mundo 3 libera o 3º.', 11, '#b39a62');
+    }
+
+    if (this.upgradeAvailable()) {
+      const up = this.nextUpgrade() as number;
+      const cost = up === 4 ? SUPREME_WORLD_COST : WORLD_INFO[up].cost;
+      const ub = this.makeButton(
+        40, 804,
+        up === 4 ? `ASCENDER AO MUNDO SUPREMO · ${cost}` : `MELHORAR O MUNDO · ${cost}`,
+        '#2d6a8a',
+        () => this.openUpgrade(up),
+        12, 520, 30,
+      );
+
+      ub.setDepth(53);
+      keep(ub);
     }
 
     if (this.canFuse()) {
@@ -8377,6 +8564,8 @@ class GameScene extends BaseScene {
 
       for (const k of snap.companionKinds) this.spawnCompanion(k);
     }
+
+    this.rebuildHeroSelector();
 
     this.applyHeroStats();
     this.heroHp = this.heroMaxHp;
