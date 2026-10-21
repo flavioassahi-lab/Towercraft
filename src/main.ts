@@ -4226,9 +4226,8 @@ class GameScene extends BaseScene {
     this.applyHeroStats();
     this.heroLabel.setText(`${HERO_STATS[kind].name} · Nv. ${this.heroLevel}`);
 
-    // Evita abuso: troca tem recarga e bloqueia a aura por alguns segundos.
+    // Evita abuso: a troca de herói tem recarga de 30s.
     this.heroSwapReadyAt = now + 30000;
-    this.auraReadyAt = Math.max(this.auraReadyAt, now + 5000);
 
     this.closeContextMenu();
     this.showMessage(`${HERO_STATS[kind].name} assumiu o comando. Nível e habilidades mantidos.`);
