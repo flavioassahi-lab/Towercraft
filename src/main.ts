@@ -116,7 +116,7 @@ const SKILL_INFO: Record<SkillKind, {
   },
   aura: {
     name: 'AURA',
-    description: 'Passiva fixa: reforça todas as torres da especialidade do herói.',
+    description: 'Passiva fixa: reforça só as torres da especialidade deste herói.',
     mana: 0,
   },
   clones: {
@@ -194,7 +194,7 @@ const HERO_STATS: Record<HeroKind, {
     armor: 0x3f6f9a,
     cape: 0x8a2a2a,
     auraName: 'Aura do Guardião',
-    auraDesc: 'Passiva: todas as torres GUARDIÃ ficam mais fortes.',
+    auraDesc: 'Passiva: só as torres GUARDIÃ ficam mais fortes.',
   },
   patrulheiro: {
     name: 'PATRULHEIRO',
@@ -212,7 +212,7 @@ const HERO_STATS: Record<HeroKind, {
     armor: 0x3d7a4a,
     cape: 0x2d4a2a,
     auraName: 'Aura do Patrulheiro',
-    auraDesc: 'Passiva: todas as torres BESTEIRA ficam mais fortes.',
+    auraDesc: 'Passiva: só as torres BESTEIRA ficam mais fortes.',
   },
   arcanista: {
     name: 'ARCANISTA',
@@ -230,7 +230,7 @@ const HERO_STATS: Record<HeroKind, {
     armor: 0x5b3f8f,
     cape: 0x3b2a66,
     auraName: 'Aura do Arcanista',
-    auraDesc: 'Passiva: todas as torres ARCANA ficam mais fortes.',
+    auraDesc: 'Passiva: só as torres ARCANA ficam mais fortes.',
   },
 };
 
@@ -364,8 +364,123 @@ type Clone = {
 
 const WORLD_INFO: Record<number, { name: string; short: string; cost: number }> = {
   1: { name: 'MUNDO 1 · PRIMITIVO', short: 'M1', cost: 0 },
-  2: { name: 'MUNDO 2 · GRÉCIA ANTIGA', short: 'M2', cost: 1000 },
-  3: { name: 'MUNDO 3 · TECNOLÓGICO', short: 'M3', cost: 3000 },
+  2: { name: 'MUNDO 2 · GRÉCIA ANTIGA', short: 'M2', cost: 10000 },
+  3: { name: 'MUNDO 3 · TECNOLÓGICO', short: 'M3', cost: 30000 },
+};
+
+const REAL_WORLD_COST = 60000;
+
+const ENEMY_HP_MULT = 10;
+const ENEMY_SPEED_MULT = 5;
+const ROAD_HALF = 26;
+
+const HERO_HP: Record<HeroKind, number> = {
+  guardiao: 260,
+  patrulheiro: 170,
+  arcanista: 150,
+};
+
+function towerMaxHp(level: number): number {
+  return 400 + 250 * (level - 1);
+}
+
+type WorldTheme = 'primitive' | 'greece' | 'tech' | 'real';
+
+type RoadPalette = {
+  shadow: number;
+  neon?: number;
+  c1: number;
+  c2: number;
+  c3: number;
+  c4: number;
+  c5: number;
+  c5a: number;
+  stoneA: number;
+  stoneB: number;
+  curb: number;
+  curbShadow: number;
+};
+
+const THEMES: Record<WorldTheme, {
+  bgCss: string;
+  g1: number;
+  g2: number;
+  patches: number[];
+  clear1: number;
+  clear2: number;
+  ring: number;
+  vignette: number;
+  road: RoadPalette;
+  portalGlow: number;
+  portalRim: number;
+  portalRim2: number;
+  portalHole: number;
+  portalLine: number;
+  portalSwirl1: number;
+  portalSwirl2: number;
+  gateLabel: string;
+  fortLabel: string;
+}> = {
+  primitive: {
+    bgCss: '#080c09',
+    g1: 0x2a3f2c, g2: 0x1b2d21,
+    patches: [0x3a5a36, 0x2f4a2e, 0x456b3a, 0x253b27],
+    clear1: 0x4a6a3e, clear2: 0x9ab86a, ring: 0xe8d28a, vignette: 0x04080a,
+    road: {
+      shadow: 0x0c0905, c1: 0x5a4d39, c2: 0x3a3226, c3: 0x85734f,
+      c4: 0x9d8a62, c5: 0xb7a37a, c5a: 0.55,
+      stoneA: 0x6b5b3f, stoneB: 0xc9b588, curb: 0x857957, curbShadow: 0x1e1a13,
+    },
+    portalGlow: 0x3aa0d0, portalRim: GOLD_DARK, portalRim2: GOLD,
+    portalHole: 0x0b2a3c, portalLine: 0x8fe3ff,
+    portalSwirl1: 0x1b6a92, portalSwirl2: 0x58bde0,
+    gateLabel: 'PORTAL DE ENTRADA', fortLabel: 'FORTALEZA',
+  },
+  greece: {
+    bgCss: '#14120a',
+    g1: 0x8a8f5a, g2: 0x5f6e45,
+    patches: [0xa8a070, 0x6f7d4a, 0x93945c, 0x7a8650],
+    clear1: 0xd8d2bc, clear2: 0xf2ecd8, ring: 0xc9a24a, vignette: 0x120e04,
+    road: {
+      shadow: 0x1a1810, c1: 0x8c8470, c2: 0xa39b84, c3: 0xcdc5aa,
+      c4: 0xe0d9c0, c5: 0xf3eddc, c5a: 0.5,
+      stoneA: 0xa39b84, stoneB: 0xf1ebd8, curb: 0xb08a3a, curbShadow: 0x3a2e10,
+    },
+    portalGlow: 0xffe08a, portalRim: 0xb08a3a, portalRim2: 0xf0d58a,
+    portalHole: 0x2a1f0a, portalLine: 0xffe9a8,
+    portalSwirl1: 0xb8832a, portalSwirl2: 0xf0c860,
+    gateLabel: 'PORTAL DO OLIMPO', fortLabel: 'TEMPLO',
+  },
+  tech: {
+    bgCss: '#04070d',
+    g1: 0x0e1828, g2: 0x070b16,
+    patches: [0x12243a, 0x0c1a2c, 0x16304a, 0x0a1424],
+    clear1: 0x14304a, clear2: 0x3af0ff, ring: 0x3af0ff, vignette: 0x000308,
+    road: {
+      shadow: 0x02040a, neon: 0x3af0ff, c1: 0x0f2433, c2: 0x14303f, c3: 0x1b3d50,
+      c4: 0x234b61, c5: 0x2a6e8c, c5a: 0.4,
+      stoneA: 0x3af0ff, stoneB: 0xff4ad8, curb: 0x3af0ff, curbShadow: 0x02040a,
+    },
+    portalGlow: 0x40ffe0, portalRim: 0x3af0ff, portalRim2: 0xff4ad8,
+    portalHole: 0x021a1c, portalLine: 0x7ffff0,
+    portalSwirl1: 0x0a7a78, portalSwirl2: 0x30e8d0,
+    gateLabel: 'PORTAL QUÂNTICO', fortLabel: 'CENTRAL',
+  },
+  real: {
+    bgCss: '#0a0b0d',
+    g1: 0x3b3f44, g2: 0x2a2d31,
+    patches: [0x474b51, 0x32353a, 0x52565c, 0x2a2d31],
+    clear1: 0x55595f, clear2: 0x8d9298, ring: 0xe0c040, vignette: 0x050506,
+    road: {
+      shadow: 0x050505, c1: 0x2a2c2f, c2: 0x34373b, c3: 0x3c4045,
+      c4: 0x41454a, c5: 0x4a4e54, c5a: 0.3,
+      stoneA: 0x24272b, stoneB: 0x5a5f66, curb: 0x9aa0a6, curbShadow: 0x15171a,
+    },
+    portalGlow: 0xdfe6ea, portalRim: 0x8a8f95, portalRim2: 0xe0c040,
+    portalHole: 0x15171a, portalLine: 0xcfd5d8,
+    portalSwirl1: 0x40444a, portalSwirl2: 0x7b838a,
+    gateLabel: 'ENTRADA', fortLabel: 'QUARTEL',
+  },
 };
 
 const ALLY_CFG: Record<AllyKind, {
@@ -413,6 +528,18 @@ type Enemy = {
   resist: Record<TowerKind, number>;
   slowUntil: number;
   flashUntil: number;
+  dps: number;
+  blockedMs: number;
+  ghostUntil: number;
+};
+
+type Blocker = {
+  x: number;
+  y: number;
+  r: number;
+  tower?: Tower;
+  hero?: boolean;
+  soft?: boolean;
 };
 
 type Tower = {
@@ -427,6 +554,9 @@ type Tower = {
   cost: number;
   totalInvested: number;
   auraUntil: number;
+  hp: number;
+  maxHp: number;
+  hitAt: number;
 };
 
 type WaveState = {
@@ -711,6 +841,7 @@ class BaseScene extends Phaser.Scene {
     x: number,
     y: number,
     kind: TowerKind,
+    theme: WorldTheme = 'primitive',
   ): Phaser.GameObjects.Container {
     const color = TOWER_STATS[kind].color;
     const c = this.add.container(x, y).setDepth(4);
@@ -720,6 +851,45 @@ class BaseScene extends Phaser.Scene {
     const glow = this.add.circle(0, 3, 27, color, 0.16)
       .setBlendMode(Phaser.BlendModes.ADD);
 
+    c.add([shadow, glow]);
+
+    this.tweens.add({
+      targets: glow,
+      alpha: 0.32,
+      scale: 1.12,
+      duration: 1100,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    if (theme === 'primitive') {
+      this.towerPrimitive(c, kind, color);
+    } else {
+      this.towerThemed(c, kind, theme, color);
+    }
+
+    const levelText = this.add.text(15, 13, 'I', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '10px',
+      color: '#f0d58a',
+      fontStyle: 'bold',
+      backgroundColor: '#0b0d10',
+      padding: { x: 3, y: 1 },
+    }).setOrigin(0.5);
+
+    c.add(levelText);
+    c.setData('levelText', levelText);
+    c.setData('towerColor', color);
+
+    return c;
+  }
+
+  protected towerPrimitive(
+    c: Phaser.GameObjects.Container,
+    kind: TowerKind,
+    color: number,
+  ) {
     const base = this.add.circle(0, 4, 22, 0x4a4a3d)
       .setStrokeStyle(3, 0x15191a);
 
@@ -732,17 +902,7 @@ class BaseScene extends Phaser.Scene {
     const innerRing = this.add.circle(0, 2, 10, 0x40483b)
       .setStrokeStyle(1, 0xb2a17b);
 
-    c.add([shadow, glow, base, stoneRing, runeRing, innerRing]);
-
-    this.tweens.add({
-      targets: glow,
-      alpha: 0.32,
-      scale: 1.12,
-      duration: 1100,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    });
+    c.add([base, stoneRing, runeRing, innerRing]);
 
     if (kind === 'basic') {
       const body = this.add.rectangle(0, -8, 21, 24, 0x496f88)
@@ -822,21 +982,350 @@ class BaseScene extends Phaser.Scene {
         ease: 'Sine.easeInOut',
       });
     }
+  }
 
-    const levelText = this.add.text(15, 13, 'I', {
-      fontFamily: 'Georgia, serif',
-      fontSize: '10px',
-      color: '#f0d58a',
-      fontStyle: 'bold',
-      backgroundColor: '#0b0d10',
-      padding: { x: 3, y: 1 },
-    }).setOrigin(0.5);
+  protected towerThemed(
+    c: Phaser.GameObjects.Container,
+    kind: TowerKind,
+    theme: WorldTheme,
+    color: number,
+  ) {
+    if (theme === 'greece') {
+      const step1 = this.add.rectangle(0, 8, 46, 12, 0xcfc7ad)
+        .setStrokeStyle(2, 0x7a7258);
+      const step2 = this.add.rectangle(0, 3, 38, 9, 0xece6d2)
+        .setStrokeStyle(2, 0x8a826a);
+      const meander = this.add.rectangle(0, 3, 30, 3, 0x2f5f9a);
 
-    c.add(levelText);
-    c.setData('levelText', levelText);
-    c.setData('towerColor', color);
+      c.add([step1, step2, meander]);
 
-    return c;
+      if (kind === 'basic') {
+        const shaft = this.add.rectangle(0, -12, 16, 26, 0xece6d2)
+          .setStrokeStyle(2, 0x8a826a);
+        const flute1 = this.add.rectangle(-3, -12, 1, 24, 0xb8b096);
+        const flute2 = this.add.rectangle(3, -12, 1, 24, 0xb8b096);
+        const capital = this.add.rectangle(0, -27, 26, 6, 0xf6f0de)
+          .setStrokeStyle(2, 0x8a826a);
+        const volL = this.add.circle(-11, -24, 3, 0xcfc7ad);
+        const volR = this.add.circle(11, -24, 3, 0xcfc7ad);
+        const shield = this.add.circle(0, -12, 9, 0xb08a3a)
+          .setStrokeStyle(2, 0x6a4e1a);
+        const emblem = this.add.star(0, -12, 5, 2, 5, color);
+        const crest = this.add.triangle(0, -36, -6, 7, 6, 7, 0, -7, 0xb02a2a)
+          .setStrokeStyle(1, 0x4a1010);
+        const spear = this.add.rectangle(15, -22, 2, 32, 0x6a4e1a);
+        const tip = this.add.triangle(15, -40, -3, 6, 3, 6, 0, -6, 0xd8d8d8);
+
+        c.add([shaft, flute1, flute2, capital, volL, volR, shield, emblem, spear, tip, crest]);
+      } else if (kind === 'rapid') {
+        const frame = this.add.rectangle(0, -8, 26, 10, 0x7a5a30)
+          .setStrokeStyle(2, 0x3a2a14);
+        const post = this.add.rectangle(0, -2, 8, 16, 0x5a4020)
+          .setStrokeStyle(1, 0x3a2a14);
+        const armL = this.add.rectangle(-12, -14, 4, 22, 0x6a4a28)
+          .setRotation(-0.35);
+        const armR = this.add.rectangle(12, -14, 4, 22, 0x6a4a28)
+          .setRotation(0.35);
+        const wheelRing = this.add.circle(0, 0, 11, 0x000000, 0)
+          .setStrokeStyle(3, 0xb08a3a);
+        const s1 = this.add.rectangle(0, 0, 3, 22, 0xb08a3a);
+        const s2 = this.add.rectangle(0, 0, 22, 3, 0xb08a3a);
+        const hub = this.add.circle(0, 0, 3, 0xe8c04a);
+        const spin = this.add.container(0, -12, [wheelRing, s1, s2, hub]);
+        const bolt = this.add.rectangle(0, -24, 2, 12, 0xd8d8d8);
+        const boltTip = this.add.triangle(0, -31, -3, 5, 3, 5, 0, -5, 0xd8d8d8);
+
+        c.add([post, frame, armL, armR, spin, bolt, boltTip]);
+
+        this.tweens.add({
+          targets: spin,
+          angle: 360,
+          duration: 1200,
+          repeat: -1,
+        });
+      } else {
+        const leg1 = this.add.rectangle(-9, -4, 3, 22, 0xb08a3a).setRotation(0.35);
+        const leg2 = this.add.rectangle(9, -4, 3, 22, 0xb08a3a).setRotation(-0.35);
+        const leg3 = this.add.rectangle(0, -4, 3, 22, 0x8a6a2a);
+        const bowl = this.add.ellipse(0, -16, 22, 9, 0xb08a3a)
+          .setStrokeStyle(2, 0x6a4e1a);
+        const laurelL = this.add.ellipse(-11, -14, 6, 3, 0x4a8a48).setRotation(-0.6);
+        const laurelR = this.add.ellipse(11, -14, 6, 3, 0x4a8a48).setRotation(0.6);
+        const flameGlow = this.add.circle(0, 0, 12, color, 0.35)
+          .setBlendMode(Phaser.BlendModes.ADD);
+        const flame = this.add.triangle(0, 0, -6, 8, 6, 8, 0, -9, 0xe6d7ff)
+          .setStrokeStyle(1, 0xffffff);
+        const floating = this.add.container(0, -28, [flameGlow, flame]);
+
+        c.add([leg1, leg2, leg3, bowl, laurelL, laurelR, floating]);
+
+        this.tweens.add({
+          targets: floating,
+          y: -32,
+          duration: 1000,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+        });
+      }
+
+      return;
+    }
+
+    if (theme === 'tech') {
+      const plate = this.add.circle(0, 4, 21, 0x0a1822)
+        .setStrokeStyle(2, 0x3af0ff, 0.9);
+      const plate2 = this.add.circle(0, 3, 15, 0x14303f)
+        .setStrokeStyle(1, 0xff4ad8, 0.8);
+
+      c.add([plate, plate2]);
+
+      if (kind === 'basic') {
+        const body = this.add.rectangle(0, -7, 24, 20, 0x3a5068)
+          .setStrokeStyle(2, 0x9ad8ff);
+        const panel = this.add.rectangle(0, -3, 16, 4, 0x14202c);
+        const led = this.add.rectangle(-6, -3, 3, 2, 0x3af0ff);
+        const dome = this.add.circle(0, -17, 10, 0x4a6680)
+          .setStrokeStyle(2, 0x9ad8ff);
+        const barrel = this.add.rectangle(14, -17, 20, 5, 0x2a3846)
+          .setStrokeStyle(1, 0x9ad8ff);
+        const muzzle = this.add.circle(25, -17, 3, color, 0.95);
+        const antenna = this.add.rectangle(-8, -30, 1.5, 12, 0x9ad8ff);
+        const beacon = this.add.circle(-8, -36, 2, 0xff4ad8);
+
+        c.add([body, panel, led, barrel, muzzle, dome, antenna, beacon]);
+
+        this.tweens.add({
+          targets: beacon,
+          alpha: 0.2,
+          duration: 500,
+          yoyo: true,
+          repeat: -1,
+        });
+      } else if (kind === 'rapid') {
+        const housing = this.add.rectangle(0, -4, 24, 18, 0x2a4a50)
+          .setStrokeStyle(2, 0x7ffff0);
+        const b1 = this.add.rectangle(0, 0, 4, 28, 0x9ad8ff)
+          .setStrokeStyle(1, 0x14202c);
+        const b2 = this.add.rectangle(0, 0, 4, 28, 0x9ad8ff)
+          .setStrokeStyle(1, 0x14202c).setRotation(Math.PI / 3);
+        const b3 = this.add.rectangle(0, 0, 4, 28, 0x9ad8ff)
+          .setStrokeStyle(1, 0x14202c).setRotation(-Math.PI / 3);
+        const hub = this.add.circle(0, 0, 5, 0x14202c)
+          .setStrokeStyle(2, 0x3af0ff);
+        const glow = this.add.circle(0, 0, 12, color, 0.3)
+          .setBlendMode(Phaser.BlendModes.ADD);
+        const spin = this.add.container(0, -14, [glow, b1, b2, b3, hub]);
+
+        c.add([housing, spin]);
+
+        this.tweens.add({
+          targets: spin,
+          angle: 360,
+          duration: 650,
+          repeat: -1,
+        });
+      } else {
+        const pillar = this.add.rectangle(0, -5, 14, 20, 0x2a2a48)
+          .setStrokeStyle(2, 0xff4ad8);
+        const ring1 = this.add.ellipse(0, 0, 30, 10, 0x000000, 0)
+          .setStrokeStyle(1.5, 0x3af0ff, 0.9);
+        const ring2 = this.add.ellipse(0, 0, 22, 18, 0x000000, 0)
+          .setStrokeStyle(1.5, 0xff4ad8, 0.8);
+        const cube = this.add.rectangle(0, 0, 11, 11, 0x9affff, 0.85)
+          .setAngle(45)
+          .setStrokeStyle(2, 0xffffff);
+        const glow = this.add.circle(0, 0, 12, 0x3af0ff, 0.35)
+          .setBlendMode(Phaser.BlendModes.ADD);
+        const floating = this.add.container(0, -26, [glow, ring1, ring2, cube]);
+
+        c.add([pillar, floating]);
+
+        this.tweens.add({
+          targets: floating,
+          y: -30,
+          duration: 900,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+        });
+
+        this.tweens.add({
+          targets: cube,
+          angle: 405,
+          duration: 2400,
+          repeat: -1,
+        });
+      }
+
+      return;
+    }
+
+    // theme === 'real'
+    const slab = this.add.rectangle(0, 6, 46, 24, 0x777b80)
+      .setStrokeStyle(2, 0x3a3d40);
+    const hazardL = this.add.rectangle(-20, 14, 6, 6, 0xe0c040);
+    const hazardR = this.add.rectangle(20, 14, 6, 6, 0xe0c040);
+    const bag1 = this.add.ellipse(-12, 16, 16, 8, 0xb59a68)
+      .setStrokeStyle(1, 0x6a5a38);
+    const bag2 = this.add.ellipse(0, 17, 16, 8, 0xc4aa78)
+      .setStrokeStyle(1, 0x6a5a38);
+    const bag3 = this.add.ellipse(12, 16, 16, 8, 0xb59a68)
+      .setStrokeStyle(1, 0x6a5a38);
+
+    c.add([slab, hazardL, hazardR]);
+
+    if (kind === 'basic') {
+      const box = this.add.rectangle(0, -7, 28, 22, 0x8a8e92)
+        .setStrokeStyle(2, 0x3a3d40);
+      const slit = this.add.rectangle(0, -9, 18, 4, 0x14161a);
+      const roof = this.add.rectangle(0, -20, 32, 5, 0x5a5e62)
+        .setStrokeStyle(1, 0x2a2d30);
+      const pole = this.add.rectangle(10, -32, 2, 14, 0xc0c4c8);
+      const flag = this.add.triangle(17, -35, 0, 0, 10, 4, 0, 8, color)
+        .setStrokeStyle(1, 0x15191a);
+
+      c.add([box, slit, roof, pole, flag, bag1, bag2, bag3]);
+
+      this.tweens.add({
+        targets: flag,
+        scaleX: 0.8,
+        duration: 500,
+        yoyo: true,
+        repeat: -1,
+      });
+    } else if (kind === 'rapid') {
+      const tripod1 = this.add.rectangle(-6, -2, 2, 14, 0x2a2c2e).setRotation(0.4);
+      const tripod2 = this.add.rectangle(6, -2, 2, 14, 0x2a2c2e).setRotation(-0.4);
+      const receiver = this.add.rectangle(0, -12, 14, 9, 0x3a3d40)
+        .setStrokeStyle(1, 0x15171a);
+      const barrel = this.add.rectangle(14, -12, 18, 4, 0x2a2c2e)
+        .setStrokeStyle(1, 0x15171a);
+      const mag = this.add.rectangle(-2, -5, 6, 8, 0x4a4e52);
+      const shield = this.add.rectangle(20, -10, 3, 14, 0x6a6e72)
+        .setStrokeStyle(1, 0x2a2d30);
+      const flash = this.add.circle(25, -12, 4, color, 0.7)
+        .setBlendMode(Phaser.BlendModes.ADD);
+
+      c.add([tripod1, tripod2, receiver, mag, barrel, shield, flash, bag1, bag2, bag3]);
+
+      this.tweens.add({
+        targets: barrel,
+        x: 12,
+        duration: 90,
+        yoyo: true,
+        repeat: -1,
+      });
+
+      this.tweens.add({
+        targets: flash,
+        alpha: 0.1,
+        duration: 90,
+        yoyo: true,
+        repeat: -1,
+      });
+    } else {
+      const mast = this.add.rectangle(0, -6, 6, 26, 0x6a6e72)
+        .setStrokeStyle(1, 0x2a2d30);
+      const dish = this.add.ellipse(0, 0, 30, 12, 0xcfd5d8)
+        .setStrokeStyle(2, 0x6a6e72);
+      const dishInner = this.add.ellipse(0, 0, 20, 7, 0x9aa2a8);
+      const feed = this.add.rectangle(0, -9, 2, 12, 0x3a3d40);
+      const feedTip = this.add.circle(0, -15, 2.5, color);
+      const rotor = this.add.container(0, -20, [dish, dishInner, feed, feedTip]);
+      const light = this.add.circle(0, -34, 2.5, 0xff3a3a);
+
+      bag2.destroy();
+      c.add([mast, rotor, light, bag1, bag3]);
+
+      this.tweens.add({
+        targets: rotor,
+        angle: 25,
+        duration: 1400,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+
+      this.tweens.add({
+        targets: light,
+        alpha: 0.15,
+        duration: 600,
+        yoyo: true,
+        repeat: -1,
+      });
+    }
+  }
+
+  protected addHeroDetail(c: Phaser.GameObjects.Container, kind: HeroKind) {
+    const st = HERO_STATS[kind];
+    const steel = 0x8a949a;
+    const add = (o: Phaser.GameObjects.GameObject) => c.add(o);
+
+    // gorjal, cota de malha, rebites e fivela
+    add(this.add.ellipse(0, -11, 17, 6, steel).setStrokeStyle(1, GOLD_DARK));
+
+    for (let i = -3; i <= 3; i++) {
+      add(this.add.circle(i * 3, 8, 1.4, 0xb0bbbd));
+    }
+
+    for (const [rx, ry] of [[-8, -8], [8, -8], [-8, 1], [8, 1]]) {
+      add(this.add.circle(rx, ry, 1.2, GOLD_LIGHT));
+    }
+
+    add(this.add.rectangle(0, 5, 5, 4, GOLD_LIGHT).setStrokeStyle(1, 0x4a3a1a));
+
+    // manoplas, braçadeiras e joelheiras
+    add(this.add.rectangle(-14, 3, 5, 7, steel).setStrokeStyle(1, GOLD_DARK));
+    add(this.add.rectangle(14, 3, 5, 7, steel).setStrokeStyle(1, GOLD_DARK));
+    add(this.add.rectangle(-6, 10, 6, 4, 0x9aa4aa).setStrokeStyle(1, GOLD_DARK));
+    add(this.add.rectangle(6, 10, 6, 4, 0x9aa4aa).setStrokeStyle(1, GOLD_DARK));
+
+    // tabardo com detalhe dourado
+    add(this.add.rectangle(0, 4, 7, 12, st.cape, 0.9).setStrokeStyle(1, GOLD_DARK));
+    add(this.add.rectangle(0, 4, 1.5, 11, GOLD_LIGHT));
+
+    if (kind === 'guardiao') {
+      add(this.add.rectangle(-7, -17, 3, 7, steel).setStrokeStyle(1, GOLD_DARK));
+      add(this.add.rectangle(7, -17, 3, 7, steel).setStrokeStyle(1, GOLD_DARK));
+      add(this.add.rectangle(0, -27, 2, 10, 0xc3ccd2));
+
+      for (const [sx, sy] of [[-14, -10], [-14, 4], [-19, -3], [-9, -3]]) {
+        add(this.add.circle(sx, sy, 1.2, GOLD_LIGHT));
+      }
+
+      add(this.add.circle(13, 3, 1.6, 0xff4a4a).setStrokeStyle(1, GOLD_LIGHT));
+    } else if (kind === 'patrulheiro') {
+      add(
+        this.add.rectangle(0, -3, 3, 26, 0x5a3a1c)
+          .setStrokeStyle(1, 0x2a1c10)
+          .setRotation(0.55),
+      );
+
+      for (const [px, py] of [[-5, -9], [0, -3], [5, 3]]) {
+        add(this.add.circle(px, py, 2.2, 0x6a4a2a).setStrokeStyle(1, 0x2a1c10));
+      }
+
+      add(this.add.triangle(0, -11, -7, 0, 7, 0, 0, 7, 0x3d7a4a).setStrokeStyle(1, 0x14261a));
+      add(this.add.rectangle(-14, 3, 5, 3, 0x5a3a1c));
+      add(this.add.rectangle(6, -30, 2, 8, 0xe8e0c8).setRotation(0.5));
+      add(this.add.rectangle(-7, 15, 12, 2, 0x5a3a1c));
+      add(this.add.rectangle(7, 15, 12, 2, 0x5a3a1c));
+    } else {
+      add(this.add.rectangle(0, 13, 24, 3, GOLD).setStrokeStyle(1, GOLD_DARK));
+      add(this.add.star(-5, 1, 4, 1, 3, 0xc8a6ff));
+      add(this.add.star(5, 5, 4, 1, 3, 0xc8a6ff));
+      add(this.add.rectangle(0, 2, 24, 3, 0x7a55c0, 0.9));
+
+      add(
+        this.add.rectangle(-14, 6, 8, 10, 0x4a2f7a)
+          .setStrokeStyle(1, GOLD)
+          .setRotation(-0.2),
+      );
+
+      add(this.add.circle(-14, 6, 2, 0xe6d7ff, 0.9));
+      add(this.add.ellipse(15, -23, 17, 5, 0x000000, 0).setStrokeStyle(1, 0xe6d7ff, 0.9));
+    }
   }
 
   protected addGearLook(
@@ -1063,6 +1552,8 @@ class BaseScene extends Phaser.Scene {
       c.add([staff, orbGlow, orb, hat, brim]);
     }
 
+    this.addHeroDetail(c, kind);
+
     if (eq) this.addGearLook(c, kind, eq, torso);
 
     c.setData('legs', [leftBoot, rightBoot]);
@@ -1115,6 +1606,13 @@ class GameScene extends BaseScene {
   private unlockedHeroes: HeroKind[] = ['guardiao'];
   private heroSwapReadyAt = 0;
   private frameCount = 0;
+  private heroHp = 200;
+  private heroMaxHp = 200;
+  private heroDead = false;
+  private heroDeaths = 0;
+  private heroHitAt = 0;
+  private heroInvulnUntil = 0;
+  private worldObjs: Phaser.GameObjects.GameObject[] = [];
   private auraRanks: Record<HeroKind, number> = { guardiao: 0, patrulheiro: 0, arcanista: 0 };
   private extraMana = 0;
   private maxBaseHP = 20;
@@ -1218,6 +1716,11 @@ class GameScene extends BaseScene {
     this.skillPoints = ex.skill;
     this.skillLevels = freshSkills();
     this.auraRanks = { guardiao: 0, patrulheiro: 0, arcanista: 0 };
+    this.heroDead = false;
+    this.heroDeaths = 0;
+    this.heroHitAt = 0;
+    this.heroInvulnUntil = 0;
+    this.heroMaxHp = 0;
     this.shieldUntil = 0;
 
     this.heroKind = hk;
@@ -1237,6 +1740,7 @@ class GameScene extends BaseScene {
     this.joystickY = 0;
 
     this.applyHeroStats();
+    this.heroHp = this.heroMaxHp;
     this.mana = this.maxMana;
   }
 
@@ -1317,43 +1821,95 @@ class GameScene extends BaseScene {
     this.add.image(0, 0, key).setOrigin(0, 0).setDepth(depth);
   }
 
+  private worldTheme(): WorldTheme {
+    if (this.finalChoice === 'real') return 'real';
+    if (this.worldLevel === 3) return 'tech';
+    if (this.worldLevel === 2) return 'greece';
+    return 'primitive';
+  }
+
   private drawWorld() {
-    this.cameras.main.setBackgroundColor('#080c09');
+    const before = new Set<Phaser.GameObjects.GameObject>(this.children.list);
+
+    this.paintWorld(this.worldTheme());
+
+    // Guarda tudo o que o cenário criou, para poder trocar de mundo.
+    this.worldObjs = this.children.list.filter(
+      (o: Phaser.GameObjects.GameObject) => !before.has(o),
+    );
+  }
+
+  private redrawWorld() {
+    for (const o of this.worldObjs) this.killVisual(o);
+
+    this.worldObjs = [];
+    this.drawWorld();
+    this.rebuildTowerLooks();
+  }
+
+  private rebuildTowerLooks() {
+    const theme = this.worldTheme();
+
+    for (const t of this.towers) {
+      const x = t.body.x;
+      const y = t.body.y;
+
+      this.killVisual(t.visual);
+
+      const v = this.createTowerVisual(x, y, t.kind, theme);
+      v.setScale(1 + (t.level - 1) * 0.055);
+
+      const lt = v.getData('levelText') as Phaser.GameObjects.Text | undefined;
+      if (lt) lt.setText(['I', 'II', 'III', 'IV', 'V'][t.level - 1]);
+
+      if (t.level >= 5) {
+        v.add(
+          this.add.circle(0, 2, 25, 0xffd54a, 0.12)
+            .setStrokeStyle(3, GOLD_LIGHT, 0.95),
+        );
+      }
+
+      t.visual = v;
+    }
+  }
+
+  private paintWorld(theme: WorldTheme) {
+    const T = THEMES[theme];
+
+    this.cameras.main.setBackgroundColor(T.bgCss);
 
     const g = this.add.graphics();
 
     // Terreno base com gradiente
-    this.fillVGradient(g, 0, 150, WIDTH, 675, 0x2a3f2c, 0x1b2d21, 1, 5);
+    this.fillVGradient(g, 0, 150, WIDTH, 675, T.g1, T.g2, 1, 5);
 
-    // Manchas de vegetação
-    const patchColors = [0x3a5a36, 0x2f4a2e, 0x456b3a, 0x253b27];
-
+    // Manchas de terreno
     for (let i = 0; i < 80; i++) {
       const x = (i * 137 + 41) % WIDTH;
       const y = 150 + ((i * 89 + 17) % 675);
       const rw = 40 + ((i * 13) % 70);
       const rh = 22 + ((i * 7) % 40);
 
-      g.fillStyle(patchColors[i % 4], 0.33);
+      g.fillStyle(T.patches[i % 4], 0.33);
       g.fillEllipse(x, y, rw, rh);
     }
 
     // Clareira central
-    g.fillStyle(0x4a6a3e, 0.3);
+    g.fillStyle(T.clear1, 0.3);
     g.fillEllipse(300, 470, 550, 600);
 
-    g.fillStyle(0x9ab86a, 0.1);
+    g.fillStyle(T.clear2, 0.1);
     g.fillEllipse(300, 470, 390, 510);
 
-    // Círculo arcano tênue no centro
-    g.lineStyle(2, 0xe8d28a, 0.1);
+    // Círculo central
+    g.lineStyle(2, T.ring, 0.12);
     g.strokeCircle(300, 470, 210);
-    g.lineStyle(1, 0xe8d28a, 0.08);
+    g.lineStyle(1, T.ring, 0.1);
     g.strokeCircle(300, 470, 180);
 
     for (let a = 0; a < 360; a += 20) {
       const rad = Phaser.Math.DegToRad(a);
-      g.lineStyle(2, 0xe8d28a, 0.1);
+      g.lineStyle(2, T.ring, 0.12);
       g.lineBetween(
         300 + Math.cos(rad) * 196,
         470 + Math.sin(rad) * 196,
@@ -1362,40 +1918,148 @@ class GameScene extends BaseScene {
       );
     }
 
-    // Tufos de grama e flores
+    this.paintGround(g, theme);
+
+    for (const path of ALL_PATHS) {
+      this.drawRoad(g, path, theme);
+    }
+
+    this.paintDecor(g, theme);
+
+    const pads = [
+      { x: 35, y: 285 }, { x: 35, y: 465 }, { x: 35, y: 645 },
+      { x: 565, y: 285 }, { x: 565, y: 465 }, { x: 565, y: 645 },
+      { x: 300, y: 285 }, { x: 300, y: 405 },
+      { x: 300, y: 525 }, { x: 300, y: 645 },
+    ];
+
+    for (const p of pads) this.drawStonePad(g, p.x, p.y, theme);
+
+    // Cenário estático vira uma imagem única (muito mais leve)
+    this.bake(g, 'world_bg', 0);
+
+    this.drawPortal(theme);
+    this.drawFortress(theme);
+
+    this.drawTorch(262, 160, theme);
+    this.drawTorch(338, 160, theme);
+    this.drawTorch(244, 800, theme);
+    this.drawTorch(356, 800, theme);
+
+    this.paintAmbient(theme);
+
+    // Vinheta escura
+    const v = this.add.graphics().setDepth(3);
+
+    for (let i = 0; i < 12; i++) {
+      const inset = i * 7 + 4;
+
+      v.lineStyle(8, T.vignette, 0.5 * Math.pow(1 - i / 12, 2));
+      v.strokeRect(
+        inset, 150 + inset, WIDTH - inset * 2, 675 - inset * 2,
+      );
+    }
+  }
+
+  // Detalhes do chão de cada mundo
+  private paintGround(g: Phaser.GameObjects.Graphics, theme: WorldTheme) {
     for (let i = 0; i < 280; i++) {
       const x = 8 + ((i * 97 + 23) % 584);
       const y = 155 + ((i * 71 + 11) % 660);
 
       if (this.isNearPath(x, y, 32)) continue;
 
-      if (i % 4 === 0) {
-        g.lineStyle(1, 0x8fb06a, 0.55);
-        g.lineBetween(x, y, x - 2, y - 5);
-        g.lineBetween(x, y, x + 1, y - 6);
-        g.lineBetween(x, y, x + 3, y - 4);
-      } else if (i % 11 === 0) {
-        g.fillStyle(i % 2 ? 0xe8d28a : 0xb98cff, 0.8);
-        g.fillCircle(x, y, 1.6);
+      if (theme === 'primitive') {
+        if (i % 4 === 0) {
+          g.lineStyle(1, 0x8fb06a, 0.55);
+          g.lineBetween(x, y, x - 2, y - 5);
+          g.lineBetween(x, y, x + 1, y - 6);
+          g.lineBetween(x, y, x + 3, y - 4);
+        } else if (i % 11 === 0) {
+          g.fillStyle(i % 2 ? 0xe8d28a : 0xb98cff, 0.8);
+          g.fillCircle(x, y, 1.6);
+        } else {
+          g.fillStyle(i % 2 ? 0x1f3223 : 0x6f9456, 0.5);
+          g.fillCircle(x, y, 1 + (i % 3));
+        }
+      } else if (theme === 'greece') {
+        if (i % 6 === 0) {
+          g.fillStyle(0xf4efe0, 0.85);
+          g.fillCircle(x, y, 1.8);
+          g.fillStyle(0xe8c04a, 0.9);
+          g.fillCircle(x, y, 0.8);
+        } else if (i % 9 === 0) {
+          g.lineStyle(1, 0x5f7a3a, 0.7);
+          g.lineBetween(x, y, x - 2, y - 6);
+          g.lineBetween(x, y, x + 2, y - 5);
+        } else {
+          g.fillStyle(i % 2 ? 0xb8ae88 : 0x6f7d4a, 0.45);
+          g.fillCircle(x, y, 1 + (i % 3));
+        }
+      } else if (theme === 'tech') {
+        if (i % 5 === 0) {
+          g.fillStyle(0x3af0ff, 0.5);
+          g.fillCircle(x, y, 1.6);
+          g.lineStyle(1, 0x3af0ff, 0.22);
+          g.lineBetween(x, y, x + ((i % 3) + 1) * 12, y);
+          g.lineBetween(x + ((i % 3) + 1) * 12, y, x + ((i % 3) + 1) * 12, y + 10);
+        } else if (i % 7 === 0) {
+          g.fillStyle(0xff4ad8, 0.4);
+          g.fillRect(x, y, 3, 3);
+        }
       } else {
-        g.fillStyle(i % 2 ? 0x1f3223 : 0x6f9456, 0.5);
-        g.fillCircle(x, y, 1 + (i % 3));
+        if (i % 5 === 0) {
+          g.lineStyle(1, 0x15171a, 0.5);
+          g.lineBetween(x, y, x + 8, y + 3);
+          g.lineBetween(x + 8, y + 3, x + 12, y + 9);
+        } else {
+          g.fillStyle(i % 2 ? 0x24272b : 0x6a7077, 0.4);
+          g.fillCircle(x, y, 1 + (i % 2));
+        }
       }
     }
 
-    for (const path of ALL_PATHS) {
-      this.drawRoad(g, path);
+    if (theme === 'tech') {
+      g.lineStyle(1, 0x3af0ff, 0.07);
+
+      for (let x = 0; x <= WIDTH; x += 30) g.lineBetween(x, 150, x, 825);
+      for (let y = 150; y <= 825; y += 30) g.lineBetween(0, y, WIDTH, y);
     }
 
-    // Pedras decorativas
+    if (theme === 'greece') {
+      // Mosaico de meandro ao redor da clareira
+      g.lineStyle(2, 0xc9a24a, 0.22);
+      g.strokeCircle(300, 470, 222);
+
+      for (let a = 0; a < 360; a += 10) {
+        const rad = Phaser.Math.DegToRad(a);
+        const cx = 300 + Math.cos(rad) * 228;
+        const cy = 470 + Math.sin(rad) * 228;
+
+        g.fillStyle(0x2f5f9a, 0.2);
+        g.fillRect(cx - 3, cy - 3, 6, 6);
+      }
+    }
+
+    if (theme === 'real') {
+      // Faixas e calçadas
+      g.fillStyle(0x8d9298, 0.35);
+      g.fillRect(0, 150, 14, 675);
+      g.fillRect(WIDTH - 14, 150, 14, 675);
+
+      g.lineStyle(2, 0xe0c040, 0.25);
+      g.strokeCircle(300, 470, 222);
+    }
+  }
+
+  // Decoração (árvores, colunas, torres, prédios...) de cada mundo
+  private paintDecor(g: Phaser.GameObjects.Graphics, theme: WorldTheme) {
     const rocks: Point[] = [
       { x: 160, y: 205 }, { x: 440, y: 205 },
       { x: 28, y: 480 }, { x: 572, y: 480 },
       { x: 165, y: 760 }, { x: 435, y: 760 },
       { x: 300, y: 215 }, { x: 300, y: 350 },
     ];
-
-    rocks.forEach((p, i) => this.drawRock(g, p.x, p.y, 7 + (i % 3) * 3));
 
     const trees: Point[] = [
       { x: 24, y: 205 }, { x: 48, y: 255 },
@@ -1409,44 +2073,48 @@ class GameScene extends BaseScene {
       { x: 145, y: 165 }, { x: 455, y: 165 },
     ];
 
-    trees.forEach((p, i) =>
-      this.drawTree(g, p.x, p.y, 14 + i % 4 * 3, i),
-    );
+    rocks.forEach((p, i) => {
+      const s = 7 + (i % 3) * 3;
 
-    const pads = [
-      { x: 35, y: 285 }, { x: 35, y: 465 }, { x: 35, y: 645 },
-      { x: 565, y: 285 }, { x: 565, y: 465 }, { x: 565, y: 645 },
-      { x: 300, y: 285 }, { x: 300, y: 405 },
-      { x: 300, y: 525 }, { x: 300, y: 645 },
-    ];
+      if (theme === 'primitive') this.drawRock(g, p.x, p.y, s);
+      else if (theme === 'greece') this.drawMarbleBlock(g, p.x, p.y, s);
+      else if (theme === 'tech') this.drawCrate(g, p.x, p.y, s);
+      else this.drawCone(g, p.x, p.y, s);
+    });
 
-    for (const p of pads) this.drawStonePad(g, p.x, p.y);
+    trees.forEach((p, i) => {
+      const s = 14 + (i % 4) * 3;
 
-    // Cenário estático vira uma imagem única (muito mais leve)
-    this.bake(g, 'world_bg', 0);
+      if (theme === 'primitive') this.drawTree(g, p.x, p.y, s, i);
+      else if (theme === 'greece') {
+        if (i % 3 === 0) this.drawCypress(g, p.x, p.y, s);
+        else this.drawColumn(g, p.x, p.y, s * 0.8, i % 4 === 1);
+      } else if (theme === 'tech') this.drawPylon(g, p.x, p.y, s);
+      else if (i % 3 === 0) this.drawTree(g, p.x, p.y, s * 0.8, i);
+      else if (i % 3 === 1) this.drawBuilding(g, p.x, p.y, s, i);
+      else this.drawLamp(g, p.x, p.y);
+    });
+  }
 
-    this.drawPortal();
-    this.drawFortress();
+  private paintAmbient(theme: WorldTheme) {
+    if (theme === 'real') return;
 
-    // Tochas
-    this.drawTorch(262, 160);
-    this.drawTorch(338, 160);
-    this.drawTorch(244, 800);
-    this.drawTorch(356, 800);
+    const count = theme === 'primitive' ? 16 : 10;
+    const color = theme === 'primitive' ? 0xe9ff9a
+      : theme === 'greece' ? 0xffe08a : 0x3af0ff;
 
-    // Vagalumes
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < count; i++) {
       const fx = 20 + ((i * 53) % 560);
       const fy = 190 + ((i * 97) % 600);
 
-      const fly = this.add.circle(fx, fy, 2, 0xe9ff9a, 0.8)
+      const fly = this.add.circle(fx, fy, 2, color, 0.8)
         .setBlendMode(Phaser.BlendModes.ADD)
         .setDepth(15);
 
       this.tweens.add({
         targets: fly,
         x: fx + Phaser.Math.Between(-30, 30),
-        y: fy + Phaser.Math.Between(-30, 30),
+        y: theme === 'tech' ? fy - 50 : fy + Phaser.Math.Between(-30, 30),
         alpha: 0.1,
         duration: Phaser.Math.Between(2000, 4000),
         delay: Phaser.Math.Between(0, 1500),
@@ -1455,21 +2123,15 @@ class GameScene extends BaseScene {
         ease: 'Sine.easeInOut',
       });
     }
-
-    // Vinheta escura
-    const v = this.add.graphics().setDepth(3);
-
-    for (let i = 0; i < 12; i++) {
-      const inset = i * 7 + 4;
-
-      v.lineStyle(8, 0x04080a, 0.5 * Math.pow(1 - i / 12, 2));
-      v.strokeRect(
-        inset, 150 + inset, WIDTH - inset * 2, 675 - inset * 2,
-      );
-    }
   }
 
-  private drawRoad(g: Phaser.GameObjects.Graphics, path: Point[]) {
+  private drawRoad(
+    g: Phaser.GameObjects.Graphics,
+    path: Point[],
+    theme: WorldTheme,
+  ) {
+    const R = THEMES[theme].road;
+
     const line = (color: number, width: number, alpha = 1) => {
       g.lineStyle(width, color, alpha);
       g.beginPath();
@@ -1482,12 +2144,13 @@ class GameScene extends BaseScene {
       g.strokePath();
     };
 
-    line(0x0c0905, 56, 0.55);
-    line(0x5a4d39, 51);
-    line(0x3a3226, 45);
-    line(0x85734f, 41);
-    line(0x9d8a62, 33);
-    line(0xb7a37a, 20, 0.55);
+    line(R.shadow, 56, 0.55);
+    if (R.neon) line(R.neon, 54, 0.55);
+    line(R.c1, 51);
+    line(R.c2, 45);
+    line(R.c3, 41);
+    line(R.c4, 33);
+    line(R.c5, 20, R.c5a);
 
     for (let i = 0; i < path.length - 1; i++) {
       const a = path[i];
@@ -1499,7 +2162,7 @@ class GameScene extends BaseScene {
       const nx = -(b.y - a.y) / distance;
       const ny = (b.x - a.x) / distance;
 
-      // Pedras do calçamento
+      // Detalhes do piso
       for (let d = 6; d < distance; d += 9) {
         const t = d / distance;
         const cx = Phaser.Math.Linear(a.x, b.x, t);
@@ -1507,21 +2170,67 @@ class GameScene extends BaseScene {
         const h = (Math.floor(d) * 7 + i * 13) % 11;
         const off = (h - 5) * 3.2;
 
-        g.fillStyle(h % 2 ? 0x6b5b3f : 0xc9b588, 0.35 + (h % 3) * 0.1);
+        g.fillStyle(h % 2 ? R.stoneA : R.stoneB, 0.35 + (h % 3) * 0.1);
         g.fillRoundedRect(cx + nx * off - 3, cy + ny * off - 2, 6, 4, 1);
       }
 
-      // Pedras de borda
+      // Bordas
       for (let d = 4; d < distance; d += 16) {
         const t = d / distance;
         const cx = Phaser.Math.Linear(a.x, b.x, t);
         const cy = Phaser.Math.Linear(a.y, b.y, t);
 
         for (const side of [-1, 1]) {
-          g.fillStyle(0x1e1a13, 0.7);
+          g.fillStyle(R.curbShadow, 0.7);
           g.fillCircle(cx + nx * 23 * side + 1, cy + ny * 23 * side + 1, 3);
-          g.fillStyle(0x857957, 0.85);
+          g.fillStyle(R.curb, 0.85);
           g.fillCircle(cx + nx * 23 * side, cy + ny * 23 * side, 2.5);
+        }
+      }
+
+      if (theme === 'real') {
+        // Faixa central tracejada
+        for (let d = 0; d < distance; d += 22) {
+          const t0 = d / distance;
+          const t1 = Math.min(distance, d + 11) / distance;
+
+          g.lineStyle(2.5, 0xe0c040, 0.85);
+          g.lineBetween(
+            Phaser.Math.Linear(a.x, b.x, t0), Phaser.Math.Linear(a.y, b.y, t0),
+            Phaser.Math.Linear(a.x, b.x, t1), Phaser.Math.Linear(a.y, b.y, t1),
+          );
+        }
+
+        for (const side of [-1, 1]) {
+          g.lineStyle(2, 0xdadde0, 0.55);
+          g.lineBetween(
+            a.x + nx * 19 * side, a.y + ny * 19 * side,
+            b.x + nx * 19 * side, b.y + ny * 19 * side,
+          );
+        }
+      }
+
+      if (theme === 'tech') {
+        for (const side of [-1, 1]) {
+          g.lineStyle(1.5, 0x3af0ff, 0.6);
+          g.lineBetween(
+            a.x + nx * 19 * side, a.y + ny * 19 * side,
+            b.x + nx * 19 * side, b.y + ny * 19 * side,
+          );
+        }
+      }
+
+      if (theme === 'greece') {
+        // Juntas das lajes de mármore
+        for (let d = 14; d < distance; d += 28) {
+          const t = d / distance;
+          const cx = Phaser.Math.Linear(a.x, b.x, t);
+          const cy = Phaser.Math.Linear(a.y, b.y, t);
+
+          g.lineStyle(1, 0x8c8470, 0.55);
+          g.lineBetween(
+            cx + nx * 20, cy + ny * 20, cx - nx * 20, cy - ny * 20,
+          );
         }
       }
     }
@@ -1556,6 +2265,65 @@ class GameScene extends BaseScene {
 
     g.lineStyle(1, 0x20241f, 1);
     g.strokePoints(pts, true);
+  }
+
+  private drawMarbleBlock(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    s: number,
+  ) {
+    g.fillStyle(0x1a1810, 0.4);
+    g.fillEllipse(x + 2, y + s * 0.7, s * 2.4, s * 0.7);
+
+    g.fillStyle(0xcfc7ad, 1);
+    g.fillRect(x - s, y - s * 0.4, s * 2, s * 0.9);
+    g.fillStyle(0xf1ebd8, 1);
+    g.fillRect(x - s, y - s * 0.4, s * 2, s * 0.3);
+    g.lineStyle(1, 0x7a7258, 1);
+    g.strokeRect(x - s, y - s * 0.4, s * 2, s * 0.9);
+    g.lineBetween(x - s * 0.2, y - s * 0.4, x - s * 0.2, y + s * 0.5);
+  }
+
+  private drawCrate(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    s: number,
+  ) {
+    g.fillStyle(0x02060a, 0.5);
+    g.fillEllipse(x + 2, y + s * 0.7, s * 2.4, s * 0.7);
+
+    g.fillStyle(0x16222e, 1);
+    g.fillRect(x - s, y - s * 0.7, s * 2, s * 1.4);
+    g.lineStyle(1.5, 0x3af0ff, 0.9);
+    g.strokeRect(x - s, y - s * 0.7, s * 2, s * 1.4);
+    g.lineBetween(x - s, y, x + s, y);
+    g.fillStyle(0x3af0ff, 0.9);
+    g.fillCircle(x - s * 0.6, y - s * 0.35, 1.5);
+    g.fillStyle(0xff4ad8, 0.9);
+    g.fillCircle(x - s * 0.6, y + s * 0.35, 1.5);
+  }
+
+  private drawCone(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    s: number,
+  ) {
+    g.fillStyle(0x0a0a0a, 0.5);
+    g.fillEllipse(x + 2, y + s * 0.6, s * 1.8, s * 0.6);
+
+    g.fillStyle(0x2a2c2f, 1);
+    g.fillRect(x - s * 0.8, y + s * 0.3, s * 1.6, s * 0.35);
+
+    g.fillStyle(0xff7a1a, 1);
+    g.fillTriangle(x - s * 0.6, y + s * 0.35, x + s * 0.6, y + s * 0.35, x, y - s);
+
+    g.fillStyle(0xf4f4f4, 1);
+    g.fillTriangle(
+      x - s * 0.36, y - s * 0.2, x + s * 0.36, y - s * 0.2, x, y - s * 0.62,
+    );
   }
 
   private drawTree(
@@ -1593,9 +2361,221 @@ class GameScene extends BaseScene {
     g.fillCircle(x - s * 0.05, y - s * 0.5, s * 0.12);
   }
 
-  private drawStonePad(g: Phaser.GameObjects.Graphics, x: number, y: number) {
+  private drawCypress(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    s: number,
+  ) {
+    g.fillStyle(0x1a1810, 0.45);
+    g.fillEllipse(x + 4, y + s * 0.6, s * 1.6, s * 0.6);
+
+    g.fillStyle(0x4a3a22, 1);
+    g.fillRect(x - 1.5, y, 3, s * 0.6);
+
+    g.fillStyle(0x16341f, 1);
+    g.fillEllipse(x, y - s * 0.7, s * 0.95, s * 2.4);
+    g.fillStyle(0x24562e, 1);
+    g.fillEllipse(x - s * 0.1, y - s * 0.8, s * 0.6, s * 2);
+    g.fillStyle(0x4a8a48, 0.8);
+    g.fillEllipse(x - s * 0.2, y - s * 1.1, s * 0.25, s * 1.1);
+  }
+
+  private drawColumn(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    s: number,
+    broken: boolean,
+  ) {
+    g.fillStyle(0x1a1810, 0.45);
+    g.fillEllipse(x + 4, y + s * 0.4, s * 2.2, s * 0.7);
+
+    const h = broken ? s * 1.1 : s * 2.4;
+
+    // base
+    g.fillStyle(0xcfc7ad, 1);
+    g.fillRect(x - s * 0.62, y - s * 0.18, s * 1.24, s * 0.34);
+    g.lineStyle(1, 0x7a7258, 1);
+    g.strokeRect(x - s * 0.62, y - s * 0.18, s * 1.24, s * 0.34);
+
+    // fuste
+    g.fillStyle(0xece6d2, 1);
+    g.fillRect(x - s * 0.4, y - h, s * 0.8, h);
+    g.fillStyle(0xb8b096, 0.55);
+    g.fillRect(x + s * 0.1, y - h, s * 0.3, h);
+
+    g.lineStyle(1, 0xa89f84, 0.9);
+
+    for (const k of [-0.2, 0, 0.2]) {
+      g.lineBetween(x + s * k, y - h, x + s * k, y - s * 0.18);
+    }
+
+    if (!broken) {
+      // capitel
+      g.fillStyle(0xf6f0de, 1);
+      g.fillRect(x - s * 0.62, y - h - s * 0.24, s * 1.24, s * 0.26);
+      g.fillStyle(0xcfc7ad, 1);
+      g.fillCircle(x - s * 0.45, y - h - s * 0.05, s * 0.14);
+      g.fillCircle(x + s * 0.45, y - h - s * 0.05, s * 0.14);
+      g.lineStyle(1, 0x7a7258, 1);
+      g.strokeRect(x - s * 0.62, y - h - s * 0.24, s * 1.24, s * 0.26);
+    } else {
+      g.fillStyle(0xece6d2, 1);
+      g.fillTriangle(
+        x - s * 0.4, y - h, x - s * 0.05, y - h - s * 0.35, x + s * 0.1, y - h,
+      );
+      g.fillStyle(0xcfc7ad, 1);
+      g.fillRect(x + s * 0.5, y, s * 0.5, s * 0.25);
+      g.fillRect(x - s, y + s * 0.05, s * 0.4, s * 0.22);
+    }
+  }
+
+  private drawPylon(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    s: number,
+  ) {
+    g.fillStyle(0x02060a, 0.55);
+    g.fillEllipse(x + 4, y + s * 0.5, s * 1.8, s * 0.6);
+
+    g.fillStyle(0x1c2a38, 1);
+    g.fillTriangle(x - s * 0.6, y + s * 0.4, x + s * 0.6, y + s * 0.4, x, y - s * 1.8);
+    g.lineStyle(1.5, 0x3af0ff, 0.85);
+    g.strokeTriangle(x - s * 0.6, y + s * 0.4, x + s * 0.6, y + s * 0.4, x, y - s * 1.8);
+
+    g.lineStyle(1, 0x3af0ff, 0.6);
+    for (let k = 0; k < 4; k++) {
+      const yy = y - s * (0.2 + k * 0.4);
+      const w = s * (0.5 - k * 0.1);
+      g.lineBetween(x - w, yy, x + w, yy);
+    }
+
+    g.fillStyle(0xff4ad8, 0.35);
+    g.fillCircle(x, y - s * 1.8, s * 0.55);
+    g.fillStyle(0xff4ad8, 1);
+    g.fillCircle(x, y - s * 1.8, s * 0.22);
+  }
+
+  private drawBuilding(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    s: number,
+    variant: number,
+  ) {
+    const w = s * 2.2;
+    const h = s * 2.6;
+
+    g.fillStyle(0x0a0a0a, 0.5);
+    g.fillEllipse(x + 6, y + s * 0.5, w * 1.1, s * 0.7);
+
+    g.fillStyle(variant % 2 ? 0x5b6068 : 0x6b5a50, 1);
+    g.fillRect(x - w / 2, y - h, w, h + s * 0.4);
+    g.fillStyle(0x3a3d42, 1);
+    g.fillRect(x - w / 2 - 2, y - h - 4, w + 4, 5);
+    g.lineStyle(1, 0x1a1c1f, 1);
+    g.strokeRect(x - w / 2, y - h, w, h + s * 0.4);
+
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 2; c++) {
+        const lit = (r * 2 + c + variant) % 3 !== 0;
+
+        g.fillStyle(lit ? 0xf0d078 : 0x20262c, 1);
+        g.fillRect(x - w / 2 + 4 + c * (w / 2 - 2), y - h + 6 + r * (s * 0.8), w / 2 - 8, s * 0.5);
+      }
+    }
+  }
+
+  private drawLamp(g: Phaser.GameObjects.Graphics, x: number, y: number) {
+    g.fillStyle(0x0a0a0a, 0.45);
+    g.fillEllipse(x + 3, y + 6, 14, 5);
+
+    g.fillStyle(0x3a3d42, 1);
+    g.fillRect(x - 1.5, y - 34, 3, 40);
+    g.fillRect(x - 1.5, y - 34, 12, 3);
+
+    g.fillStyle(0xfff0b0, 0.25);
+    g.fillCircle(x + 10, y - 31, 14);
+    g.fillStyle(0xfff0b0, 1);
+    g.fillRect(x + 7, y - 33, 7, 4);
+  }
+
+  private drawStonePad(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    theme: WorldTheme,
+  ) {
     g.fillStyle(0x0a100c, 0.5);
     g.fillEllipse(x + 3, y + 6, 50, 30);
+
+    if (theme === 'greece') {
+      g.fillStyle(0x8a826a, 1);
+      g.fillCircle(x, y, 24);
+      g.fillStyle(0xe9e3cf, 1);
+      g.fillCircle(x, y, 21);
+      g.lineStyle(2, 0xb08a3a, 1);
+      g.strokeCircle(x, y, 18);
+
+      for (let a = 0; a < 360; a += 30) {
+        const rad = Phaser.Math.DegToRad(a);
+        g.fillStyle(0x2f5f9a, 1);
+        g.fillRect(x + Math.cos(rad) * 15 - 2, y + Math.sin(rad) * 15 - 2, 4, 4);
+      }
+
+      g.fillStyle(0xcfc7ad, 1);
+      g.fillCircle(x, y, 11);
+      g.fillStyle(0xb08a3a, 1);
+      g.fillCircle(x, y, 4);
+      return;
+    }
+
+    if (theme === 'tech') {
+      const hex = (r: number) => {
+        const pts: Phaser.Types.Math.Vector2Like[] = [];
+
+        for (let k = 0; k < 6; k++) {
+          const a = Phaser.Math.DegToRad(k * 60 + 30);
+          pts.push({ x: x + Math.cos(a) * r, y: y + Math.sin(a) * r });
+        }
+
+        return pts;
+      };
+
+      g.fillStyle(0x0a1822, 1);
+      g.fillPoints(hex(24), true);
+      g.lineStyle(2, 0x3af0ff, 0.9);
+      g.strokePoints(hex(22), true);
+      g.fillStyle(0x12303f, 1);
+      g.fillPoints(hex(16), true);
+      g.lineStyle(1, 0xff4ad8, 0.8);
+      g.strokePoints(hex(12), true);
+      g.fillStyle(0x3af0ff, 0.8);
+      g.fillCircle(x, y, 3);
+      return;
+    }
+
+    if (theme === 'real') {
+      g.fillStyle(0x3a3d40, 1);
+      g.fillRect(x - 24, y - 20, 48, 40);
+      g.fillStyle(0x8a8f95, 1);
+      g.fillRect(x - 21, y - 17, 42, 34);
+
+      for (const [cx, cy] of [[-21, -17], [15, -17], [-21, 11], [15, 11]]) {
+        g.fillStyle(0xe0c040, 1);
+        g.fillRect(x + cx, y + cy, 6, 6);
+        g.fillStyle(0x1a1a1a, 1);
+        g.fillTriangle(x + cx, y + cy, x + cx + 6, y + cy, x + cx, y + cy + 6);
+      }
+
+      g.lineStyle(2, 0xf2f2f2, 0.8);
+      g.strokeCircle(x, y, 10);
+      g.fillStyle(0xf2f2f2, 0.8);
+      g.fillCircle(x, y, 2.5);
+      return;
+    }
 
     g.fillStyle(0x2c2e26, 1);
     g.fillCircle(x, y, 24);
@@ -1626,17 +2606,52 @@ class GameScene extends BaseScene {
     g.fillCircle(x, y, 3);
   }
 
-  private drawTorch(x: number, y: number) {
+  private drawTorch(x: number, y: number, theme: WorldTheme) {
     const post = this.add.graphics().setDepth(2);
 
     post.fillStyle(0x0a100c, 0.45);
     post.fillEllipse(x + 2, y + 10, 14, 6);
 
-    post.fillStyle(0x3b2d1c, 1);
-    post.fillRect(x - 2, y - 6, 4, 16);
+    if (theme === 'tech' || theme === 'real') {
+      const neon = theme === 'tech';
+      const col = neon ? 0x3af0ff : 0xfff0b0;
 
-    post.fillStyle(0x7a6a48, 1);
-    post.fillRect(x - 5, y - 9, 10, 4);
+      post.fillStyle(neon ? 0x1c2a38 : 0x3a3d42, 1);
+      post.fillRect(x - 2, y - 18, 4, 28);
+      post.fillRect(x - 6, y - 20, 12, 4);
+
+      const glow = this.add.circle(x, y - 22, 22, col, 0.18)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(3);
+
+      this.add.rectangle(x, y - 22, 10, 4, col).setDepth(3);
+
+      this.tweens.add({
+        targets: glow,
+        alpha: 0.08,
+        duration: 900,
+        yoyo: true,
+        repeat: -1,
+      });
+
+      return;
+    }
+
+    if (theme === 'greece') {
+      // Braseiro de bronze
+      post.fillStyle(0x8a6a2a, 1);
+      post.fillRect(x - 2, y - 4, 4, 14);
+      post.fillStyle(0xb08a3a, 1);
+      post.fillTriangle(x - 8, y - 12, x + 8, y - 12, x, y - 2);
+      post.lineStyle(1, 0x4a3a12, 1);
+      post.strokeTriangle(x - 8, y - 12, x + 8, y - 12, x, y - 2);
+    } else {
+      post.fillStyle(0x3b2d1c, 1);
+      post.fillRect(x - 2, y - 6, 4, 16);
+
+      post.fillStyle(0x7a6a48, 1);
+      post.fillRect(x - 5, y - 9, 10, 4);
+    }
 
     const glow = this.add.circle(x, y - 14, 26, 0xff9a3c, 0.16)
       .setBlendMode(Phaser.BlendModes.ADD)
@@ -1667,11 +2682,12 @@ class GameScene extends BaseScene {
     });
   }
 
-  private drawPortal() {
+  private drawPortal(theme: WorldTheme) {
+    const T = THEMES[theme];
     const px = 300;
     const py = 165;
 
-    const aura = this.add.circle(px, py, 46, 0x3aa0d0, 0.2)
+    const aura = this.add.circle(px, py, 46, T.portalGlow, 0.2)
       .setBlendMode(Phaser.BlendModes.ADD)
       .setDepth(2);
 
@@ -1690,11 +2706,39 @@ class GameScene extends BaseScene {
     frame.fillStyle(0x0a100c, 0.5);
     frame.fillEllipse(px + 2, py + 8, 76, 40);
 
-    frame.fillStyle(0x23282a, 1);
+    if (theme === 'greece') {
+      for (const cx of [px - 46, px + 46]) {
+        frame.fillStyle(0xece6d2, 1);
+        frame.fillRect(cx - 5, py - 26, 10, 44);
+        frame.fillStyle(0xf6f0de, 1);
+        frame.fillRect(cx - 8, py - 30, 16, 6);
+        frame.fillRect(cx - 8, py + 16, 16, 5);
+        frame.lineStyle(1, 0x7a7258, 1);
+        frame.strokeRect(cx - 5, py - 26, 10, 44);
+      }
+    } else if (theme === 'tech') {
+      for (const cx of [px - 46, px + 46]) {
+        frame.fillStyle(0x1c2a38, 1);
+        frame.fillRect(cx - 6, py - 22, 12, 40);
+        frame.lineStyle(1.5, 0x3af0ff, 0.9);
+        frame.strokeRect(cx - 6, py - 22, 12, 40);
+        frame.fillStyle(0xff4ad8, 1);
+        frame.fillCircle(cx, py - 26, 3);
+      }
+    } else if (theme === 'real') {
+      for (const cx of [px - 46, px + 46]) {
+        for (let k = 0; k < 4; k++) {
+          frame.fillStyle(k % 2 ? 0x1a1a1a : 0xe0c040, 1);
+          frame.fillRect(cx - 6, py - 20 + k * 10, 12, 10);
+        }
+      }
+    }
+
+    frame.fillStyle(theme === 'tech' ? 0x14202c : 0x23282a, 1);
     frame.fillCircle(px, py, 32);
-    frame.lineStyle(3, GOLD_DARK, 1);
+    frame.lineStyle(3, T.portalRim, 1);
     frame.strokeCircle(px, py, 32);
-    frame.lineStyle(1, GOLD, 1);
+    frame.lineStyle(1, T.portalRim2, 1);
     frame.strokeCircle(px, py, 29);
 
     for (let i = 0; i < 8; i++) {
@@ -1710,15 +2754,15 @@ class GameScene extends BaseScene {
       );
     }
 
-    this.add.circle(px, py, 24, 0x0b2a3c)
-      .setStrokeStyle(2, 0x6fcff0)
+    this.add.circle(px, py, 24, T.portalHole)
+      .setStrokeStyle(2, T.portalLine)
       .setDepth(2);
 
-    // Anel de runas giratório
+    // Anel giratório
     const runes = this.add.container(px, py).setDepth(2);
     const rg = this.add.graphics();
 
-    rg.lineStyle(1.5, 0x8fe3ff, 0.85);
+    rg.lineStyle(1.5, T.portalLine, 0.85);
     rg.strokeCircle(0, 0, 21);
 
     for (let i = 0; i < 12; i++) {
@@ -1743,17 +2787,17 @@ class GameScene extends BaseScene {
     const swirl = this.add.container(px, py).setDepth(2);
     const sg = this.add.graphics();
 
-    sg.fillStyle(0x1b6a92, 0.9);
+    sg.fillStyle(T.portalSwirl1, 0.9);
     sg.fillCircle(0, 0, 15);
-    sg.fillStyle(0x58bde0, 0.85);
+    sg.fillStyle(T.portalSwirl2, 0.85);
     sg.fillCircle(0, 0, 10);
 
-    sg.lineStyle(2, 0xdff8ff, 0.9);
+    sg.lineStyle(2, 0xffffff, 0.9);
     sg.beginPath();
     sg.arc(0, 0, 12, 0, Math.PI * 1.1);
     sg.strokePath();
 
-    sg.lineStyle(2, 0xdff8ff, 0.7);
+    sg.lineStyle(2, 0xffffff, 0.7);
     sg.beginPath();
     sg.arc(0, 0, 7, Math.PI, Math.PI * 2.1);
     sg.strokePath();
@@ -1769,7 +2813,7 @@ class GameScene extends BaseScene {
 
     this.add.circle(px, py, 4, 0xf0ffff, 0.95).setDepth(2);
 
-    this.add.text(px, 128, 'PORTAL DE ENTRADA', {
+    this.add.text(px, 128, T.gateLabel, {
       fontFamily: 'Georgia, serif',
       fontSize: '10px',
       color: '#f0d58a',
@@ -1781,84 +2825,185 @@ class GameScene extends BaseScene {
     }).setOrigin(0.5).setDepth(2);
   }
 
-  private drawFortress() {
+  private drawFortress(theme: WorldTheme) {
     const g = this.add.graphics().setDepth(2);
 
     g.fillStyle(0x0a100c, 0.55);
     g.fillEllipse(300, 826, 130, 22);
 
-    // Muralha principal
-    this.fillVGradient(g, 258, 778, 84, 46, 0x6a6e63, 0x383c36, 1, 2);
+    if (theme === 'greece') {
+      // Templo de mármore
+      for (let k = 0; k < 3; k++) {
+        g.fillStyle(k % 2 ? 0xcfc7ad : 0xe3dcc6, 1);
+        g.fillRect(246 - k * 4, 818 - k * 4, 108 + k * 8, 6);
+      }
 
-    g.lineStyle(1, 0x20241f, 0.6);
+      g.fillStyle(0x1a1208, 1);
+      g.fillRect(286, 786, 28, 34);
 
-    for (let row = 0; row < 5; row++) {
-      g.lineBetween(258, 786 + row * 9, 342, 786 + row * 9);
+      for (const cx of [254, 270, 330, 346]) {
+        g.fillStyle(0xece6d2, 1);
+        g.fillRect(cx - 5, 772, 10, 46);
+        g.fillStyle(0xb8b096, 0.55);
+        g.fillRect(cx + 1, 772, 4, 46);
+        g.fillStyle(0xf6f0de, 1);
+        g.fillRect(cx - 8, 767, 16, 6);
+        g.lineStyle(1, 0x7a7258, 1);
+        g.strokeRect(cx - 5, 772, 10, 46);
+      }
+
+      g.fillStyle(0xf1ebd8, 1);
+      g.fillRect(246, 758, 108, 9);
+      g.lineStyle(2, 0x7a7258, 1);
+      g.strokeRect(246, 758, 108, 9);
+
+      g.fillStyle(0xe3dcc6, 1);
+      g.fillTriangle(242, 758, 358, 758, 300, 730);
+      g.fillStyle(0x2f5f9a, 1);
+      g.fillTriangle(256, 756, 344, 756, 300, 737);
+      g.lineStyle(2, 0x7a7258, 1);
+      g.strokeTriangle(242, 758, 358, 758, 300, 730);
+
+      this.drawGem(g, 300, 746, 4, 0xe8c04a);
+    } else if (theme === 'tech') {
+      // Bunker futurista
+      this.fillVGradient(g, 252, 770, 96, 54, 0x2a3a4a, 0x0e1822, 1, 3);
+      g.lineStyle(2, 0x3af0ff, 0.9);
+      g.strokeRect(252, 770, 96, 54);
+
+      for (const tx of [240, 340]) {
+        this.fillVGradient(g, tx, 750, 20, 74, 0x34485c, 0x101c28, 1, 3);
+        g.lineStyle(2, 0x3af0ff, 0.9);
+        g.strokeRect(tx, 750, 20, 74);
+
+        g.fillStyle(0xff4ad8, 0.9);
+        g.fillRect(tx + 6, 764, 8, 4);
+        g.fillStyle(0x3af0ff, 0.9);
+        g.fillRect(tx + 6, 776, 8, 4);
+        g.fillRect(tx + 6, 788, 8, 4);
+
+        g.lineStyle(2, 0x3af0ff, 1);
+        g.lineBetween(tx + 10, 750, tx + 10, 728);
+        g.fillStyle(0xff4ad8, 1);
+        g.fillCircle(tx + 10, 727, 3);
+      }
+
+      g.fillStyle(0x02060a, 1);
+      g.fillRect(288, 790, 24, 34);
+      g.lineStyle(2, 0x3af0ff, 1);
+      g.strokeRect(288, 790, 24, 34);
+      g.lineBetween(300, 790, 300, 824);
+
+      g.fillStyle(0x3af0ff, 0.12);
+      g.fillCircle(300, 800, 62);
+      g.lineStyle(1.5, 0x3af0ff, 0.45);
+      g.strokeCircle(300, 800, 62);
+    } else if (theme === 'real') {
+      // Edifício de concreto com sacos de areia
+      this.fillVGradient(g, 252, 764, 96, 60, 0x8a8f95, 0x50555a, 1, 3);
+      g.lineStyle(2, 0x2a2d30, 1);
+      g.strokeRect(252, 764, 96, 60);
+
+      g.fillStyle(0x3a3d42, 1);
+      g.fillRect(248, 758, 104, 8);
+
+      for (let r = 0; r < 2; r++) {
+        for (let c = 0; c < 4; c++) {
+          g.fillStyle((r + c) % 3 === 0 ? 0xf0d078 : 0x20262c, 1);
+          g.fillRect(260 + c * 22, 774 + r * 14, 14, 9);
+        }
+      }
+
+      g.fillStyle(0x1a1c1f, 1);
+      g.fillRect(288, 798, 24, 26);
+
+      for (let k = 0; k < 7; k++) {
+        g.fillStyle(k % 2 ? 0xb59a68 : 0xc4aa78, 1);
+        g.fillEllipse(246 + k * 18, 826, 18, 10);
+        g.lineStyle(1, 0x6a5a38, 1);
+        g.strokeEllipse(246 + k * 18, 826, 18, 10);
+      }
+
+      g.lineStyle(2, 0xc0c4c8, 1);
+      g.lineBetween(300, 758, 300, 730);
+      g.fillStyle(0xa8322e, 1);
+      g.fillRect(300, 730, 20, 12);
+    } else {
+      // Muralha principal
+      this.fillVGradient(g, 258, 778, 84, 46, 0x6a6e63, 0x383c36, 1, 2);
+
+      g.lineStyle(1, 0x20241f, 0.6);
+
+      for (let row = 0; row < 5; row++) {
+        g.lineBetween(258, 786 + row * 9, 342, 786 + row * 9);
+      }
+
+      // Ameias
+      for (let i = 0; i < 7; i++) {
+        g.fillStyle(0x7d8177, 1);
+        g.fillRect(258 + i * 12, 771, 7, 8);
+        g.lineStyle(1, 0x20241f, 1);
+        g.strokeRect(258 + i * 12, 771, 7, 8);
+      }
+
+      // Torres laterais
+      for (const tx of [250, 328]) {
+        this.fillVGradient(g, tx, 762, 22, 62, 0x7a7e72, 0x3a3e38, 1, 2);
+
+        g.lineStyle(2, 0x20241f, 1);
+        g.strokeRect(tx, 762, 22, 62);
+
+        g.fillStyle(0xffc860, 0.95);
+        g.fillRect(tx + 8, 776, 6, 10);
+        g.lineStyle(1, 0x20241f, 1);
+        g.strokeRect(tx + 8, 776, 6, 10);
+
+        g.fillStyle(0x8a2a28, 1);
+        g.fillTriangle(tx - 4, 764, tx + 11, 742, tx + 26, 764);
+        g.fillStyle(0xb8423a, 1);
+        g.fillTriangle(tx - 4, 764, tx + 11, 742, tx + 11, 764);
+        g.lineStyle(2, 0x2a0e0d, 1);
+        g.strokeTriangle(tx - 4, 764, tx + 11, 742, tx + 26, 764);
+
+        this.drawGem(g, tx + 11, 740, 3, GOLD_LIGHT);
+      }
+
+      // Portão em arco
+      g.fillStyle(0x0d0905, 1);
+      g.fillRect(290, 796, 20, 28);
+      g.fillCircle(300, 796, 10);
+
+      g.lineStyle(2, GOLD, 1);
+      g.beginPath();
+      g.arc(300, 796, 10, Math.PI, 0);
+      g.strokePath();
+      g.lineBetween(290, 796, 290, 824);
+      g.lineBetween(310, 796, 310, 824);
+
+      g.lineStyle(1, 0x5a4a2a, 1);
+
+      for (let i = 0; i < 4; i++) {
+        g.lineBetween(293 + i * 5, 790, 293 + i * 5, 824);
+      }
     }
 
-    // Ameias
-    for (let i = 0; i < 7; i++) {
-      g.fillStyle(0x7d8177, 1);
-      g.fillRect(258 + i * 12, 771, 7, 8);
-      g.lineStyle(1, 0x20241f, 1);
-      g.strokeRect(258 + i * 12, 771, 7, 8);
+    if (theme === 'primitive' || theme === 'greece') {
+      // Estandarte
+      const banner = this.add.triangle(
+        300, theme === 'greece' ? 722 : 760, 0, 0, 22, 0, 11, 18, 0xa8322e,
+      ).setStrokeStyle(2, GOLD).setDepth(2);
+
+      this.tweens.add({
+        targets: banner,
+        scaleX: 0.88,
+        duration: 900,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
     }
 
-    // Torres laterais
-    for (const tx of [250, 328]) {
-      this.fillVGradient(g, tx, 762, 22, 62, 0x7a7e72, 0x3a3e38, 1, 2);
-
-      g.lineStyle(2, 0x20241f, 1);
-      g.strokeRect(tx, 762, 22, 62);
-
-      g.fillStyle(0xffc860, 0.95);
-      g.fillRect(tx + 8, 776, 6, 10);
-      g.lineStyle(1, 0x20241f, 1);
-      g.strokeRect(tx + 8, 776, 6, 10);
-
-      g.fillStyle(0x8a2a28, 1);
-      g.fillTriangle(tx - 4, 764, tx + 11, 742, tx + 26, 764);
-      g.fillStyle(0xb8423a, 1);
-      g.fillTriangle(tx - 4, 764, tx + 11, 742, tx + 11, 764);
-      g.lineStyle(2, 0x2a0e0d, 1);
-      g.strokeTriangle(tx - 4, 764, tx + 11, 742, tx + 26, 764);
-
-      this.drawGem(g, tx + 11, 740, 3, GOLD_LIGHT);
-    }
-
-    // Portão em arco
-    g.fillStyle(0x0d0905, 1);
-    g.fillRect(290, 796, 20, 28);
-    g.fillCircle(300, 796, 10);
-
-    g.lineStyle(2, GOLD, 1);
-    g.beginPath();
-    g.arc(300, 796, 10, Math.PI, 0);
-    g.strokePath();
-    g.lineBetween(290, 796, 290, 824);
-    g.lineBetween(310, 796, 310, 824);
-
-    g.lineStyle(1, 0x5a4a2a, 1);
-
-    for (let i = 0; i < 4; i++) {
-      g.lineBetween(293 + i * 5, 790, 293 + i * 5, 824);
-    }
-
-    // Estandarte
-    const banner = this.add.triangle(
-      300, 760, 0, 0, 22, 0, 11, 18, 0xa8322e,
-    ).setStrokeStyle(2, GOLD).setDepth(2);
-
-    this.tweens.add({
-      targets: banner,
-      scaleX: 0.88,
-      duration: 900,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    });
-
-    this.add.text(300, 730, 'FORTALEZA', {
+    this.add.text(300, 706, THEMES[theme].fortLabel, {
       fontFamily: 'Georgia, serif',
       fontSize: '12px',
       color: '#f0d58a',
@@ -1969,6 +3114,31 @@ class GameScene extends BaseScene {
         leftEye, rightEye, eyeGlowL, eyeGlowR, mouth, club, clubHead,
       ]);
 
+      // detalhes: presas, espinhos, cinto de crânio, colar de ossos, tinta de guerra
+      c.add([
+        this.add.ellipse(0, -8, 26, 7, 0x5a4030),
+        this.add.triangle(-17, -15, -3, 5, 3, 5, 0, -6, 0xd5c69b),
+        this.add.triangle(17, -15, -3, 5, 3, 5, 0, -6, 0xd5c69b),
+        this.add.triangle(-4, -8, -2, -2, 2, -2, 0, 3, 0xefe6c8),
+        this.add.triangle(4, -8, -2, -2, 2, -2, 0, 3, 0xefe6c8),
+        this.add.rectangle(0, 9, 24, 4, 0x3a2a1c).setStrokeStyle(1, 0x1a120a),
+        this.add.circle(0, 9, 3.2, 0xd5c69b).setStrokeStyle(1, 0x4a3628),
+        this.add.circle(-1, 9, 0.8, 0x1a120a),
+        this.add.circle(1, 9, 0.8, 0x1a120a),
+        this.add.rectangle(-8, -23, 2, 6, 0xc03a2a).setRotation(0.3),
+        this.add.rectangle(8, -23, 2, 6, 0xc03a2a).setRotation(-0.3),
+        this.add.rectangle(3, -21, 1.5, 7, 0x2b1d19).setRotation(0.6),
+        this.add.circle(-6, -2, 1.6, 0xe8dcb8),
+        this.add.circle(-3, 0, 1.6, 0xe8dcb8),
+        this.add.circle(0, 1, 1.6, 0xe8dcb8),
+        this.add.circle(3, 0, 1.6, 0xe8dcb8),
+        this.add.circle(6, -2, 1.6, 0xe8dcb8),
+        this.add.circle(-6, -5, 1.2, 0xc0a16b),
+        this.add.circle(6, -5, 1.2, 0xc0a16b),
+        this.add.triangle(-22, 10, -2, -3, 2, -3, 0, 3, 0xd5c69b),
+        this.add.triangle(22, 10, -2, -3, 2, -3, 0, 3, 0xd5c69b),
+      ]);
+
       leftLeg.setData('by', leftLeg.y);
       rightLeg.setData('by', rightLeg.y);
       c.setData('legs', [leftLeg, rightLeg]);
@@ -2023,6 +3193,23 @@ class GameScene extends BaseScene {
         aura, shadow, cape, leftLeg, rightLeg, legs, body, armor, head,
         earL, earR, eyeL, eyeR, eyeGlowL, eyeGlowR, nose,
         armL, armR, dagger,
+      ]);
+
+      // detalhes: presas, brincos, bandagem, cinto, tanga, garras
+      c.add([
+        this.add.triangle(-2, -10, -1.5, -2, 1.5, -2, 0, 3, 0xefe6c8),
+        this.add.triangle(2, -10, -1.5, -2, 1.5, -2, 0, 3, 0xefe6c8),
+        this.add.circle(-13, -16, 1.8, 0xd5c69b),
+        this.add.circle(13, -16, 1.8, 0xd5c69b),
+        this.add.rectangle(0, -21, 12, 3, 0xcfc7a8).setRotation(-0.2),
+        this.add.rectangle(0, 7, 17, 3, 0x3a2a1c).setStrokeStyle(1, 0x1a120a),
+        this.add.circle(0, 7, 2, 0xb49b65),
+        this.add.triangle(0, 14, -5, -3, 5, -3, 0, 4, 0x6a4a2a),
+        this.add.circle(-9, -7, 4, 0x756344).setStrokeStyle(1, 0xb49b65),
+        this.add.triangle(-16, 7, -2, -2, 2, -2, 0, 3, 0xd5c69b),
+        this.add.triangle(16, 7, -2, -2, 2, -2, 0, 3, 0xd5c69b),
+        this.add.rectangle(-5, -3, 1.5, 6, 0x35442a),
+        this.add.rectangle(5, -3, 1.5, 6, 0x35442a),
       ]);
 
       leftLeg.setData('by', leftLeg.y);
@@ -2160,7 +3347,7 @@ class GameScene extends BaseScene {
     );
 
     this.heroButton = this.makeButton(
-      206, 104, 'HERÓI', '#5e4482',
+      206, 104, 'LOJA', '#5e4482',
       () => this.openHeroPanel(), 11, 188, 36,
     );
 
@@ -2505,6 +3692,11 @@ class GameScene extends BaseScene {
   private openHeroMenu() {
     if (this.gameOver) return;
 
+    if (this.heroDead) {
+      this.openReviveModal();
+      return;
+    }
+
     this.cancelBuild();
     this.selectedTower = null;
     this.rangeGraphics.clear();
@@ -2651,7 +3843,7 @@ class GameScene extends BaseScene {
     const info = this.add.text(
       188, 870,
       `Dano: ${tower.damage}  |  Alcance: ${Math.round(tower.range)}  |  Intervalo: ${Math.round(tower.fireRate)} ms\n` +
-      `Investido: ${tower.totalInvested} moedas`,
+      `Vida: ${Math.ceil(tower.hp)}/${tower.maxHp}  |  Investido: ${tower.totalInvested} moedas`,
       {
         fontFamily: 'Arial, sans-serif',
         fontSize: '11px',
@@ -2821,8 +4013,8 @@ class GameScene extends BaseScene {
     if (x < 22 || x > WIDTH - 22) return false;
     if (y < 175 || y > 780) return false;
 
-    // Mantém os dois caminhos livres.
-    if (this.isNearPath(x, y, 34)) return false;
+    // Pode construir no caminho, mas não em cima da entrada dos monstros.
+    if (Phaser.Math.Distance.Between(x, y, ENTRY.x, ENTRY.y) < 60) return false;
 
     // Espaçamento menor entre torres, sem impedir várias Arcanas.
     return !this.towers.some(t =>
@@ -2845,13 +4037,13 @@ class GameScene extends BaseScene {
 
     if (!this.isValidBuildLocation(x, y, kind)) {
       this.showMessage(
-        'Local inválido. Afaste-se um pouco dos caminhos e das outras torres.',
+        'Local inválido: perto demais de outra torre ou da entrada dos monstros.',
       );
       this.updateBuildPreview(x, y);
       return;
     }
 
-    const visual = this.createTowerVisual(x, y, kind);
+    const visual = this.createTowerVisual(x, y, kind, this.worldTheme());
     const body = this.add.circle(x, y, 18, 0x000000, 0)
       .setStrokeStyle(0, 0x000000, 0);
 
@@ -2867,6 +4059,9 @@ class GameScene extends BaseScene {
       cost: stats.cost,
       totalInvested: stats.cost,
       auraUntil: 0,
+      hp: towerMaxHp(1),
+      maxHp: towerMaxHp(1),
+      hitAt: 0,
     };
 
     this.towers.push(tower);
@@ -2929,6 +4124,8 @@ class GameScene extends BaseScene {
     tower.fireRate = Math.max(120, tower.fireRate * 0.92);
 
     tower.visual.setScale(1 + (tower.level - 1) * 0.055);
+    tower.maxHp = towerMaxHp(tower.level);
+    tower.hp = Math.min(tower.maxHp, tower.hp + 250);
 
     if (tower.level === 5) {
       const crown = this.add.circle(0, 2, 25, 0xffd54a, 0.12)
@@ -3083,15 +4280,19 @@ class GameScene extends BaseScene {
       * type.hp * hpTier;
 
     if (this.finalChoice === 'real') hp *= 1.35;
-    hp = Math.max(2, Math.round(hp));
+    hp = Math.max(
+      2,
+      Math.round(hp * (this.finalChoice === 'tech' ? 1 : ENEMY_HP_MULT)),
+    );
 
-    let reward = (strong ? 18 : 10)
+    let reward = (strong ? 36 : 20)
       * (1 + waveId * 0.035) * type.reward * rewardTier;
 
-    if (this.finalChoice === 'real') reward *= 0.8;
+    if (this.finalChoice === 'tech') reward *= 10;
     reward = Math.max(1, Math.round(reward));
 
     const speed = (strong ? 40 : 55 + Math.min(waveId, 20))
+      * ENEMY_SPEED_MULT
       * type.speed
       * (tier === 'boss' ? 0.75 : tier === 'elite' ? 0.9 : 1);
 
@@ -3125,6 +4326,10 @@ class GameScene extends BaseScene {
       resist: type.resist,
       slowUntil: 0,
       flashUntil: 0,
+      dps: (tier === 'boss' ? 120 : tier === 'elite' ? 55 : strong ? 28 : 14)
+        * (1 + waveId * 0.04),
+      blockedMs: 0,
+      ghostUntil: 0,
     };
 
     this.enemies.push(enemy);
@@ -3230,11 +4435,25 @@ class GameScene extends BaseScene {
   private updateEnemies(delta: number) {
     this.healthLayer.clear();
 
-    const blockers = [
-      { x: this.hero.x, y: this.hero.y, r: this.heroBlockRadius() },
-      ...this.allies.map(a => ({ x: a.x, y: a.y, r: 13 })),
-      ...this.clones.map(c => ({ x: c.x, y: c.y, r: 13 })),
-    ];
+    const blockers: Blocker[] = [];
+
+    if (!this.heroDead) {
+      blockers.push({
+        x: this.hero.x, y: this.hero.y, r: this.heroBlockRadius(), hero: true,
+      });
+    }
+
+    for (const t of this.towers) {
+      blockers.push({ x: t.body.x, y: t.body.y, r: 20, tower: t });
+    }
+
+    for (const a of this.allies) {
+      blockers.push({ x: a.x, y: a.y, r: 13, soft: true });
+    }
+
+    for (const c of this.clones) {
+      blockers.push({ x: c.x, y: c.y, r: 13, soft: true });
+    }
 
     this.frameCount++;
     const list = this.enemies;
@@ -3268,6 +4487,8 @@ class GameScene extends BaseScene {
         continue;
       }
 
+      const prevX = enemy.body.x;
+      const prevY = enemy.body.y;
       const dx = target.x - enemy.body.x;
       const dy = target.y - enemy.body.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
@@ -3284,12 +4505,16 @@ class GameScene extends BaseScene {
         enemy.visual.setData('facing', Math.cos(angle) < 0 ? -1 : 1);
       }
 
-      // Bloqueio físico: contorna herói e aliados lateralmente
+      // Bloqueio físico: torres e herói fecham a estrada; aliados e clones
+      // só empurram. Os monstros contornam enquanto houver espaço.
       const vx = Math.cos(angle);
       const vy = Math.sin(angle);
       const enemyRadius = (enemy.strong ? 16 : 12) * enemy.size;
+      let hit: Blocker | null = null;
 
       for (const b of blockers) {
+        if (b.soft && nowMs < enemy.ghostUntil) continue;
+
         const rx = enemy.body.x - b.x;
         const ry = enemy.body.y - b.y;
         const minD = b.r + enemyRadius;
@@ -3311,6 +4536,31 @@ class GameScene extends BaseScene {
 
         enemy.body.x += nx * (minD - d) * 0.6 + tx * step * 0.9;
         enemy.body.y += ny * (minD - d) * 0.6 + ty * step * 0.9;
+
+        if (!hit || (hit.soft && !b.soft)) hit = b;
+      }
+
+      this.clampToRoad(enemy);
+
+      // Sem passagem: se o monstro está travado, ataca o que o bloqueia.
+      const moved = Math.hypot(enemy.body.x - prevX, enemy.body.y - prevY);
+
+      if (hit && moved < step * 0.35) {
+        enemy.blockedMs += delta;
+
+        if (hit.soft) {
+          if (enemy.blockedMs > 700) {
+            enemy.ghostUntil = nowMs + 1500;
+            enemy.blockedMs = 0;
+          }
+        } else if (enemy.blockedMs > 400) {
+          const dmg = enemy.dps * delta / 1000;
+
+          if (hit.tower) this.hurtTower(hit.tower, dmg);
+          else if (hit.hero) this.hurtHero(dmg);
+        }
+      } else if (enemy.blockedMs > 0) {
+        enemy.blockedMs = Math.max(0, enemy.blockedMs - delta * 2);
       }
 
       enemy.visual.setPosition(enemy.body.x, enemy.body.y);
@@ -3331,6 +4581,165 @@ class GameScene extends BaseScene {
       }
 
       this.drawEnemyHealth(enemy, crowded);
+    }
+
+    this.drawUnitBars();
+  }
+
+  private clampToRoad(enemy: Enemy) {
+    const a = enemy.path[enemy.segment];
+    const b = enemy.path[enemy.segment + 1];
+    if (!a || !b) return;
+
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    if (len2 === 0) return;
+
+    const t = Phaser.Math.Clamp(
+      ((enemy.body.x - a.x) * dx + (enemy.body.y - a.y) * dy) / len2,
+      0, 1,
+    );
+
+    const px = a.x + t * dx;
+    const py = a.y + t * dy;
+    const ex = enemy.body.x - px;
+    const ey = enemy.body.y - py;
+    const d = Math.sqrt(ex * ex + ey * ey);
+
+    if (d > ROAD_HALF) {
+      enemy.body.x = px + (ex / d) * ROAD_HALF;
+      enemy.body.y = py + (ey / d) * ROAD_HALF;
+    }
+  }
+
+  private hurtTower(tower: Tower, dmg: number) {
+    tower.hp -= dmg;
+    tower.hitAt = this.time.now;
+
+    if (tower.hp > 0) return;
+
+    this.floatText(
+      tower.body.x, tower.body.y - 30, 'TORRE DESTRUÍDA!', '#ff8a7a', 12,
+    );
+
+    tower.body.destroy();
+    this.killVisual(tower.visual);
+    this.towers = this.towers.filter(t => t !== tower);
+
+    if (this.selectedTower === tower) {
+      this.selectedTower = null;
+      this.rangeGraphics.clear();
+      this.closeContextMenu();
+    }
+
+    this.showMessage('Uma torre foi destruída pelos monstros!');
+  }
+
+  private hurtHero(dmg: number) {
+    const now = this.time.now;
+
+    if (this.heroDead || now < this.heroInvulnUntil) return;
+
+    this.heroHp -= dmg;
+    this.heroHitAt = now;
+
+    if (this.heroHp <= 0) this.killHero();
+  }
+
+  private killHero() {
+    this.heroHp = 0;
+    this.heroDead = true;
+    this.heroDeaths++;
+    this.cloneUntil = 0;
+
+    this.heroVisual.setVisible(false);
+    this.heroLabel.setVisible(false);
+
+    this.floatText(this.hero.x, this.hero.y - 40, 'HERÓI CAIU!', '#ff8a7a', 14);
+    this.showMessage('O herói foi derrotado! Revivê-lo custa moedas.');
+    this.openReviveModal();
+  }
+
+  private reviveCost(): number {
+    return 1000 * this.heroDeaths;
+  }
+
+  private openReviveModal() {
+    const cost = this.reviveCost();
+
+    const body =
+      'Seu herói foi derrotado e está fora da batalha: sem ataques, sem habilidades e sem bloquear o caminho.\n\n' +
+      `Reviver custa ${cost} moedas (a cada morte o preço sobe 1000).\n` +
+      `Você tem ${this.coins} moedas.`;
+
+    this.openModal('HERÓI DERROTADO', body, [
+      {
+        label: `REVIVER · ${cost}`,
+        color: '#8a6a22',
+        action: () => {
+          if (this.coins < cost) {
+            this.modalBody?.setText(body + '\n\nMOEDAS INSUFICIENTES!').setColor('#ff9a8a');
+            return;
+          }
+
+          this.reviveHero();
+        },
+      },
+      { label: 'AGORA NÃO', color: '#3a4046', action: () => this.closeModal() },
+    ]);
+  }
+
+  private reviveHero() {
+    if (!this.heroDead) return;
+
+    const cost = this.reviveCost();
+    if (this.coins < cost) return;
+
+    this.coins -= cost;
+    this.heroDead = false;
+    this.heroHp = this.heroMaxHp;
+    this.heroInvulnUntil = this.time.now + 3000;
+
+    this.hero.setPosition(300, 700);
+    this.heroVisual.setPosition(300, 700).setVisible(true);
+    this.heroLabel.setPosition(300, 658).setVisible(true);
+
+    const ring = this.add.circle(300, 700, 20, 0xfff0a0, 0.3)
+      .setStrokeStyle(3, GOLD_LIGHT, 0.9)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(13);
+
+    this.tweens.add({
+      targets: ring,
+      scale: 4,
+      alpha: 0,
+      duration: 600,
+      onComplete: () => ring.destroy(),
+    });
+
+    this.closeModal();
+    this.showMessage('O herói voltou à batalha!');
+    this.refreshInterface();
+  }
+
+  private drawUnitBars() {
+    const g = this.healthLayer;
+
+    const bar = (x: number, y: number, w: number, ratio: number, color: number) => {
+      g.fillStyle(0x000000, 0.85);
+      g.fillRect(x - w / 2 - 1, y - 1, w + 2, 7);
+      g.fillStyle(color, 1);
+      g.fillRect(x - w / 2, y, w * Phaser.Math.Clamp(ratio, 0, 1), 5);
+    };
+
+    for (const t of this.towers) {
+      if (t.hp >= t.maxHp) continue;
+      bar(t.body.x, t.body.y - 42, 38, t.hp / t.maxHp, 0xe8a23a);
+    }
+
+    if (!this.heroDead && this.heroHp < this.heroMaxHp) {
+      bar(this.hero.x, this.hero.y - 54, 46, this.heroHp / this.heroMaxHp, 0x4ad0ff);
     }
   }
 
@@ -3454,6 +4863,10 @@ class GameScene extends BaseScene {
     };
 
     for (const tower of this.towers) {
+      if (tower.hp < tower.maxHp && now - tower.hitAt > 4000) {
+        tower.hp = Math.min(tower.maxHp, tower.hp + tower.maxHp * 0.02 * delta / 1000);
+      }
+
       tower.cooldown -= delta;
       if (tower.cooldown > 0) continue;
 
@@ -3620,6 +5033,8 @@ class GameScene extends BaseScene {
   }
 
   private moveHero(delta: number) {
+    if (this.heroDead) return;
+
     let dx = this.joystickX;
     let dy = this.joystickY;
 
@@ -3654,6 +5069,17 @@ class GameScene extends BaseScene {
   }
 
   private updateHeroCombat(delta: number) {
+    if (this.heroDead) return;
+
+    if (
+      this.heroHp < this.heroMaxHp &&
+      this.time.now - this.heroHitAt > 5000
+    ) {
+      this.heroHp = Math.min(
+        this.heroMaxHp, this.heroHp + this.heroMaxHp * 0.015 * delta / 1000,
+      );
+    }
+
     this.heroAttackCooldown -= delta;
     if (this.heroAttackCooldown > 0) return;
 
@@ -3720,6 +5146,7 @@ class GameScene extends BaseScene {
       this.heroDamage++;
       this.heroRange += 5;
       this.maxMana += 5;
+      this.applyHeroHp();
       this.mana = Math.min(this.maxMana, this.mana + 5);
 
       this.showMessage(
@@ -3756,6 +5183,11 @@ class GameScene extends BaseScene {
 
   private useSkill(skill: SkillKind) {
     if (this.gameOver) return;
+
+    if (this.heroDead) {
+      this.showMessage('O herói está caído. Reviva-o para usar habilidades.');
+      return;
+    }
 
     const rank = this.skillLevels[skill];
     const info = SKILL_INFO[skill];
@@ -4055,7 +5487,7 @@ class GameScene extends BaseScene {
     this.xpText.setText(`XP  ${this.xp} / ${this.heroLevel * 50}`);
     this.levelText.setText(`${this.heroLevel}`);
 
-    this.setButtonLabel(this.heroButton, `HERÓI  ·  PAINEL  ·  Nv.${this.heroLevel}`);
+    this.setButtonLabel(this.heroButton, 'LOJA');
 
     this.drawBars();
   }
@@ -4260,33 +5692,25 @@ class GameScene extends BaseScene {
 
   private applyWorldTheme() {
     if (this.finalChoice === 'real') {
-      this.worldOverlay.setFillStyle(0x7a8088, 0.18);
+      this.worldOverlay.setFillStyle(0x7a8088, 0.06);
     } else if (this.worldLevel === 2) {
-      this.worldOverlay.setFillStyle(0xf0d28a, 0.12);
+      this.worldOverlay.setFillStyle(0xf0d28a, 0.05);
     } else if (this.worldLevel === 3) {
-      this.worldOverlay.setFillStyle(0x3ccfff, 0.1);
+      this.worldOverlay.setFillStyle(0x3ccfff, 0.04);
     } else {
       this.worldOverlay.setFillStyle(0x000000, 0);
     }
   }
 
-  private auraRankOf(h: HeroKind): number {
-    return h === this.heroKind ? this.skillLevels.aura : this.auraRanks[h];
-  }
-
-  // Aura passiva e permanente: cada herói reforça SÓ as torres da sua
-  // especialidade, em qualquer lugar do mapa.
+  // Aura passiva e permanente do herói em campo: reforça SÓ as torres da
+  // especialidade dele. O nível de aura de cada herói fica guardado.
   private auraFor(kind: TowerKind): AuraBoost {
-    for (const h of this.unlockedHeroes) {
-      if (HERO_STATS[h].specialty !== kind) continue;
+    if (HERO_STATS[this.heroKind].specialty !== kind) return null;
 
-      const rank = this.auraRankOf(h);
-      if (rank <= 0) return null;
+    const rank = this.skillLevels.aura;
+    if (rank <= 0) return null;
 
-      return { dmg: 1 + 0.12 * rank, spd: 1 + 0.1 * rank, rank };
-    }
-
-    return null;
+    return { dmg: 1 + 0.12 * rank, spd: 1 + 0.1 * rank, rank };
   }
 
   private updateAura() {
@@ -4329,10 +5753,28 @@ class GameScene extends BaseScene {
       + this.extraMana * 25 + eq.relic * 10;
     this.manaRegen = 8 + eq.relic * 1.5;
     this.mana = Math.min(this.mana, this.maxMana);
+    this.applyHeroHp();
+  }
+
+  private applyHeroHp() {
+    const eq = this.equip[this.heroKind];
+    const max = HERO_HP[this.heroKind] + (this.heroLevel - 1) * 15 + eq.armor * 40;
+    const ratio = this.heroMaxHp > 0 ? this.heroHp / this.heroMaxHp : 1;
+
+    this.heroMaxHp = max;
+
+    if (!this.heroDead) {
+      this.heroHp = Math.max(1, Math.min(max, ratio * max));
+    }
   }
 
   private swapHero(kind: HeroKind) {
     if (kind === this.heroKind || !this.unlockedHeroes.includes(kind)) return;
+
+    if (this.heroDead) {
+      this.showMessage('Reviva o herói antes de trocar.');
+      return;
+    }
 
     const now = this.time.now;
 
@@ -4464,6 +5906,7 @@ class GameScene extends BaseScene {
     if (nextHero) this.unlockedHeroes.push(nextHero);
 
     this.applyWorldTheme();
+    this.redrawWorld();
     this.closeModal();
 
     this.showMessage(
@@ -4477,10 +5920,7 @@ class GameScene extends BaseScene {
 
   private openFinalChoice() {
     const body =
-      'Você chegou à onda 90 com todo o poder do Mundo Tecnológico.\n\n' +
-      'MUNDO TECNOLÓGICO: mantém o poder máximo. Torres causam +30% de dano nas ondas 91 a 100. Caminho da recompensa e do domínio.\n\n' +
-      'MUNDO REAL: inimigos com +35% de vida e recompensas reduzidas em 20%. Exige estratégia e posicionamento.\n\n' +
-      'A escolha é registrada e não será pedida novamente.';
+      `Qual mundo você escolhe?\n\nVocê tem ${this.coins} moedas.`;
 
     this.openModal('A ESCOLHA FINAL', body, [
       {
@@ -4489,9 +5929,17 @@ class GameScene extends BaseScene {
         action: () => this.chooseFinal('tech'),
       },
       {
-        label: 'MUNDO REAL',
+        label: `MUNDO REAL · ${REAL_WORLD_COST}`,
         color: '#6a4a3a',
-        action: () => this.chooseFinal('real'),
+        action: () => {
+          if (this.coins < REAL_WORLD_COST) {
+            this.modalBody?.setText(body + '\n\nMOEDAS INSUFICIENTES PARA ESTE MUNDO!').setColor('#ff9a8a');
+            return;
+          }
+
+          this.coins -= REAL_WORLD_COST;
+          this.chooseFinal('real');
+        },
       },
     ]);
   }
@@ -4499,13 +5947,17 @@ class GameScene extends BaseScene {
   private chooseFinal(choice: 'tech' | 'real') {
     this.finalChoice = choice;
     this.applyWorldTheme();
+    this.redrawWorld();
     this.closeModal();
 
-    this.showMessage(
-      choice === 'tech'
-        ? 'Você permaneceu no Mundo Tecnológico: torres +30% de dano. Inicie a onda 91.'
-        : 'Você retornou ao Mundo Real: inimigos mais fortes e menos recompensas. Inicie a onda 91.',
-    );
+    if (choice === 'real') {
+      // O Mundo Real traz mais ajuda: aliados extras de todos os tipos.
+      this.spawnAllies('dog');
+      this.spawnAllies('human');
+      this.spawnAllies('drone');
+    }
+
+    this.showMessage('Mundo escolhido. Inicie a onda 91.');
   }
 
   // ---------- poderes dos heróis e das torres ----------
@@ -4801,6 +6253,7 @@ class GameScene extends BaseScene {
       this.heroKind, this.hero.x, this.hero.y, this.equip[this.heroKind],
     ).setDepth(7);
     this.heroVisual.setScale(flip, 1);
+    this.heroVisual.setVisible(!this.heroDead);
     this.heroLegs = this.heroVisual.getData('legs') as Phaser.GameObjects.Rectangle[];
   }
 
@@ -4917,7 +6370,7 @@ class GameScene extends BaseScene {
     label(
       40, 280,
       aura
-        ? `${st.auraName} Nv.${aura.rank}: +${Math.round(aura.dmg * 100 - 100)}% dano e +${Math.round(aura.spd * 100 - 100)}% velocidade em TODAS as torres ${TOWER_STATS[st.specialty].name}.`
+        ? `${st.auraName} Nv.${aura.rank}: +${Math.round(aura.dmg * 100 - 100)}% dano e +${Math.round(aura.spd * 100 - 100)}% velocidade nas torres ${TOWER_STATS[st.specialty].name} (só as dele).`
         : 'Aura passiva bloqueada: melhore AURA em Habilidades (clique no herói).',
       11, '#e6dfcd',
     ).setWordWrapWidth(520);
@@ -5017,11 +6470,29 @@ class GameScene extends BaseScene {
 
     label(
       40, 830,
-      `Pontos de habilidade: ${this.skillPoints}   ·   XP ${this.xp} / ${this.heroLevel * 50}`,
+      `Vida: ${Math.ceil(this.heroHp)}/${this.heroMaxHp}   ·   Pontos: ${this.skillPoints}   ·   XP ${this.xp} / ${this.heroLevel * 50}`,
       12, '#d9d0b7',
     );
 
     this.panelNote = label(40, 860, '', 12, '#ff9a8a');
+
+    if (this.heroDead) {
+      const rv = this.makeButton(
+        40, 884, `REVIVER HERÓI · ${this.reviveCost()}`, '#8a3a2c',
+        () => {
+          if (this.coins < this.reviveCost()) {
+            this.panelNote?.setText('Moedas insuficientes para reviver.');
+            return;
+          }
+
+          this.reviveHero();
+        },
+        13, 520, 40,
+      );
+
+      rv.setDepth(53);
+      keep(rv);
+    }
   }
 
   private openPixShop() {
@@ -5285,7 +6756,8 @@ class GameScene extends BaseScene {
       if (target && a.cooldown <= 0 && best <= cfg.range + 6) {
         a.cooldown = cfg.rate;
 
-        const dmg = cfg.base + Math.floor(this.heroLevel * cfg.perLevel);
+        const dmg = (cfg.base + Math.floor(this.heroLevel * cfg.perLevel))
+          * (this.finalChoice === 'real' ? 1.5 : 1);
         const tx = target.body.x;
         const ty = target.body.y;
 
