@@ -205,8 +205,8 @@ const HERO_LINES: Record<HeroKind, {
   skill: Record<string, string>;
 }> = {
   guardiao: {
-    pitch: 0.7,
-    rate: 0.95,
+    pitch: 0.55,
+    rate: 0.9,
     who: 'male',
     select: ['Pela fortaleza!', 'Nenhum passará!', 'Meu escudo é a muralha!'],
     level: 'Mais forte!',
@@ -219,7 +219,7 @@ const HERO_LINES: Record<HeroKind, {
     },
   },
   patrulheiro: {
-    pitch: 1.2,
+    pitch: 1.6,
     rate: 1.1,
     who: 'female',
     select: ['Alvo na mira!', 'Olhos abertos.', 'Pronta para a caçada!'],
@@ -233,8 +233,8 @@ const HERO_LINES: Record<HeroKind, {
     },
   },
   arcanista: {
-    pitch: 0.4,
-    rate: 0.7,
+    pitch: 0.3,
+    rate: 0.66,
     who: 'old',
     select: ['A magia me guia, meu jovem.', 'Sinto o poder...', 'Os astros respondem.'],
     level: 'Meu poder cresce!',
@@ -496,7 +496,10 @@ const SFX = (() => {
 
   const voiceFor = (who: 'male' | 'female' | 'old'): SpeechSynthesisVoice | null => {
     try {
-      const list = window.speechSynthesis.getVoices().filter(v => /^pt/i.test(v.lang));
+      // Vozes locais respeitam tom e velocidade; as de rede (Google) costumam ignorar.
+      const all = window.speechSynthesis.getVoices().filter(v => /^pt/i.test(v.lang));
+      const local = all.filter(v => v.localService);
+      const list = local.length ? local : all;
 
       if (!list.length) return null;
 
@@ -505,9 +508,14 @@ const SFX = (() => {
 
       if (who === 'female') return list.find(v => FEM.test(v.name)) ?? list[0];
 
-      return list.find(v => MAS.test(v.name) && !FEM.test(v.name))
-        ?? list.find(v => !FEM.test(v.name))
-        ?? list[0];
+      const males = list.filter(v => !FEM.test(v.name));
+      const pref = males.filter(v => MAS.test(v.name));
+      const pool = pref.length ? pref : males;
+
+      // O idoso usa outra voz masculina quando houver mais de uma.
+      if (who === 'old') return pool[1] ?? pool[0] ?? list[0];
+
+      return pool[0] ?? list[0];
     } catch {
       return null;
     }
