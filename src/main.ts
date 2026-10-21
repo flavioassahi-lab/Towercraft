@@ -1751,6 +1751,7 @@ class GameScene extends BaseScene {
   private levelText!: Phaser.GameObjects.Text;
   private messageText!: Phaser.GameObjects.Text;
   private buildInfoText!: Phaser.GameObjects.Text;
+  private buildExitText!: Phaser.GameObjects.Text;
   private barGraphics!: Phaser.GameObjects.Graphics;
 
   protected buildButton!: Phaser.GameObjects.Container;
@@ -1880,6 +1881,12 @@ class GameScene extends BaseScene {
       if (pointer.y < 150 || pointer.y >= 825) return;
 
       if (this.buildMode) {
+        // Botão X / SAIR no canto superior direito.
+        if (pointer.x >= 490 && pointer.y < 200) {
+          this.exitBuild('Construção encerrada.');
+          return;
+        }
+
         this.askBuild(pointer.x, pointer.y);
         return;
       }
@@ -3681,6 +3688,20 @@ class GameScene extends BaseScene {
       strokeThickness: 2,
     }).setDepth(19).setVisible(false);
 
+    this.buildExitText = this.add.text(588, 158, '  X  SAIR  ', {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: '13px',
+      fontStyle: 'bold',
+      color: '#ffffff',
+      backgroundColor: '#a33a30',
+      padding: { x: 6, y: 6 },
+    }).setOrigin(1, 0).setDepth(19).setVisible(false);
+
+    // ESC também encerra a construção.
+    this.input.keyboard?.on('keydown-ESC', () => {
+      if (this.buildMode) this.exitBuild('Construção encerrada.');
+    });
+
     // ---------- HUD INFERIOR ----------
     const bar = this.add.graphics().setDepth(18);
 
@@ -4302,6 +4323,7 @@ class GameScene extends BaseScene {
     );
 
     this.buildInfoText.setVisible(true);
+    this.buildExitText.setVisible(true);
     this.buildPreview.setVisible(true);
 
     const pointer = this.input.activePointer;
@@ -4320,6 +4342,16 @@ class GameScene extends BaseScene {
     this.buildPreview.clear();
     this.buildPreview.setVisible(false);
     this.buildInfoText.setVisible(false);
+    this.buildExitText.setVisible(false);
+  }
+
+  // Sai do modo de construção: some a sombra e não constrói mais.
+  private exitBuild(msg?: string) {
+    this.cancelBuild();
+    this.closeContextMenu();
+    this.refreshInterface();
+
+    if (msg) this.showMessage(msg);
   }
 
   private updateBuildPreview(x: number, y: number) {
@@ -4398,15 +4430,14 @@ class GameScene extends BaseScene {
     const stats = TOWER_STATS[kind];
 
     if (this.coins < stats.cost && this.stock[kind] <= 0) {
-      this.showMessage('Moedas insuficientes para construir esta torre.');
+      this.exitBuild('Moedas insuficientes para construir esta torre.');
       return;
     }
 
     if (!this.isValidBuildLocation(x, y, kind)) {
-      this.showMessage(
-        'Local inválido: perto demais de outra torre ou da entrada dos monstros.',
+      this.exitBuild(
+        'Local inválido: construção encerrada. Escolha a torre de novo para construir.',
       );
-      this.updateBuildPreview(x, y);
       return;
     }
 
@@ -4430,12 +4461,7 @@ class GameScene extends BaseScene {
 
     this.addContextButton(
       398, 876, 'CANCELAR', '#7a352c',
-      () => {
-        // Cancelar sai do modo de construção: sem mais sombra.
-        this.cancelBuild();
-        this.closeContextMenu();
-        this.refreshInterface();
-      },
+      () => this.exitBuild('Construção cancelada.'),
       150, 30,
     );
   }
@@ -4513,7 +4539,7 @@ class GameScene extends BaseScene {
       this.updateBuildPreview(pointer.x, pointer.y);
 
       this.showMessage(
-        `${stats.name} construída! Toque em outro local para construir mais ou no botão de construir para sair.`,
+        `${stats.name} construída! Toque em outro local para construir mais, ou em X SAIR / ESC para encerrar.`,
       );
     } else {
       this.cancelBuild();
