@@ -5802,19 +5802,65 @@ class GameScene extends BaseScene {
     const maxLv = this.lv6[tower.kind] ? 6 : 5;
     const needDia = tower.level === 5 && !this.lv6[tower.kind];
 
+    // Valores base + bônus da AURA em verde (ex.: Dano: 20 +4).
+    const boost = this.auraFor(tower.kind);
+    const baseDmg = tower.damage * tower.level;
+    const dmgBonus = boost ? Math.round(baseDmg * (boost.dmg - 1)) : 0;
+    const msBonus = boost
+      ? Math.round(tower.fireRate - tower.fireRate / boost.spd)
+      : 0;
+
+    const WHITE = '#e6dfcd';
+    const GREEN = '#6dff7a';
+    const parts: Array<[string, string]> = [
+      [`Dano: ${baseDmg}`, WHITE],
+    ];
+
+    if (dmgBonus > 0) parts.push([` +${dmgBonus}`, GREEN]);
+    parts.push([`  |  Alcance: ${Math.round(tower.range)}  |  Intervalo: ${Math.round(tower.fireRate)} ms`, WHITE]);
+    if (msBonus > 0) parts.push([` -${msBonus}`, GREEN]);
+
+    let px = 188;
+
+    for (const [txt, col] of parts) {
+      const t = this.add.text(px, 868, txt, {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '11px',
+        color: col,
+        fontStyle: col === GREEN ? 'bold' : 'normal',
+      }).setDepth(33);
+
+      px += t.width;
+      this.contextObjects.push(t);
+    }
+
     const info = this.add.text(
-      188, 870,
-      `Dano: ${tower.damage}  |  Alcance: ${Math.round(tower.range)}  |  Intervalo: ${Math.round(tower.fireRate)} ms\n` +
-      `Vida: ${Math.ceil(tower.hp)}/${tower.maxHp}  |  Investido: ${tower.totalInvested} moedas`,
+      188, 886,
+      `Vida: ${Math.ceil(tower.hp)}/${tower.maxHp}  |  Investido: ${tower.totalInvested} moedas` +
+      (boost ? '' : '  |  Sem aura'),
       {
         fontFamily: 'Arial, sans-serif',
         fontSize: '11px',
-        color: '#e6dfcd',
-        lineSpacing: 5,
+        color: WHITE,
       },
     ).setDepth(33);
 
     this.contextObjects.push(info);
+
+    if (boost) {
+      const tag = this.add.text(
+        188 + info.width + 8, 886,
+        `AURA +${Math.round((boost.dmg - 1) * 100)}% dano · +${Math.round((boost.spd - 1) * 100)}% vel.`,
+        {
+          fontFamily: 'Arial, sans-serif',
+          fontSize: '10px',
+          color: GREEN,
+          fontStyle: 'bold',
+        },
+      ).setDepth(33);
+
+      this.contextObjects.push(tag);
+    }
 
     this.addContextButton(
       188, 912,
@@ -9043,6 +9089,23 @@ class GameScene extends BaseScene {
       g.fillEllipse(t.body.x, t.body.y + 14, 58, 24);
       g.lineStyle(2, GOLD_LIGHT, pulse);
       g.strokeEllipse(t.body.x, t.body.y + 14, 58, 24);
+
+      // Círculo brilhante em volta da torre sob aura.
+      const cy = t.body.y - 4;
+      const ph = this.time.now / 500;
+
+      g.fillStyle(0xfff0a0, 0.1 + 0.06 * Math.sin(ph));
+      g.fillCircle(t.body.x, cy, 34);
+      g.lineStyle(3, 0xfff0a0, 0.55 + 0.35 * Math.sin(ph));
+      g.strokeCircle(t.body.x, cy, 34);
+      g.lineStyle(1.5, 0xffffff, 0.35 + 0.3 * Math.sin(ph + 1.5));
+      g.strokeCircle(t.body.x, cy, 40 + 2 * Math.sin(ph));
+
+      for (let k = 0; k < 3; k++) {
+        const a = ph * 1.4 + k * 2.094;
+        g.fillStyle(0xffffff, 0.9);
+        g.fillCircle(t.body.x + Math.cos(a) * 34, cy + Math.sin(a) * 34, 2.2);
+      }
     }
   }
 
