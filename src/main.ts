@@ -5047,15 +5047,30 @@ class GameScene extends BaseScene {
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(22);
 
-    // Diamante
-    ui.fillStyle(0x1f5f8f, 1);
-    ui.fillTriangle(104, 51, 112, 51, 108, 59);
-    ui.fillStyle(0x6fd8ff, 1);
-    ui.fillTriangle(100, 51, 116, 51, 108, 62);
-    ui.fillStyle(0xdff8ff, 0.9);
-    ui.fillTriangle(104, 51, 108, 51, 106, 55);
-    ui.lineStyle(1, 0x1f5f8f, 1);
-    ui.strokeTriangle(100, 51, 116, 51, 108, 62);
+    // Diamante (ícone ao lado do número, como a moeda)
+    const gem = this.add.graphics().setDepth(23);
+
+    gem.fillStyle(0x0b3a5c, 1);
+    gem.fillPoints([
+      new Phaser.Geom.Point(99, 50), new Phaser.Geom.Point(103, 46),
+      new Phaser.Geom.Point(113, 46), new Phaser.Geom.Point(117, 50),
+      new Phaser.Geom.Point(108, 63),
+    ], true);
+    gem.fillStyle(0x4fc8ff, 1);
+    gem.fillPoints([
+      new Phaser.Geom.Point(100.5, 50), new Phaser.Geom.Point(104, 47.5),
+      new Phaser.Geom.Point(112, 47.5), new Phaser.Geom.Point(115.5, 50),
+      new Phaser.Geom.Point(108, 60.5),
+    ], true);
+    gem.fillStyle(0xcdf3ff, 1);
+    gem.fillPoints([
+      new Phaser.Geom.Point(104, 47.5), new Phaser.Geom.Point(108, 47.5),
+      new Phaser.Geom.Point(106, 50),
+    ], true);
+    gem.lineStyle(1, 0x0b3a5c, 1);
+    gem.lineBetween(100.5, 50, 115.5, 50);
+    gem.lineBetween(104, 50, 108, 60.5);
+    gem.lineBetween(112, 50, 108, 60.5);
 
     this.diaText = this.add.text(122, 54, `${this.diamonds}`, {
       fontFamily: 'Georgia, serif',
