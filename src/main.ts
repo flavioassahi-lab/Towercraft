@@ -131,13 +131,32 @@ const SKILL_INFO: Record<SkillKind, {
   },
 };
 
-const SKILL_COOLDOWN: Record<SkillKind, number> = {
-  explosion: 8000,
-  repair: 10000,
-  strike: 3000,
-  aura: 0,
-  clones: 18000,
-  lightning: 7000,
+// O "Golpe Heroico" é o último poder (ultimate) e muda para cada herói.
+const STRIKE_INFO: Record<'guardiao' | 'patrulheiro' | 'arcanista' | 'fused', {
+  name: string;
+  description: string;
+  mana: number;
+}> = {
+  guardiao: {
+    name: 'GOLPE TITÂNICO',
+    description: 'Esmaga o chão: onda de choque gigante, dano altíssimo e atordoa.',
+    mana: 60,
+  },
+  patrulheiro: {
+    name: 'CHUVA DE FLECHAS',
+    description: 'Dezenas de flechas luminosas despencam sobre o grupo.',
+    mana: 60,
+  },
+  arcanista: {
+    name: 'METEORO ARCANO',
+    description: 'Meteoro colossal cai com raios e explode em área, lentificando.',
+    mana: 65,
+  },
+  fused: {
+    name: 'JUÍZO FINAL',
+    description: 'Golpe + flechas + meteoro de uma vez. Ainda cura a base.',
+    mana: 90,
+  },
 };
 
 function freshSkills(): Record<SkillKind, number> {
@@ -362,6 +381,37 @@ type Clone = {
   slot: number;
 };
 
+type Companion = {
+  kind: HeroKind;
+  visual: Phaser.GameObjects.Container;
+  legs: Phaser.GameObjects.Rectangle[];
+  label: Phaser.GameObjects.Text;
+  x: number;
+  y: number;
+  cd: number;
+  slot: number;
+};
+
+type TechSnap = {
+  coins: number;
+  xp: number;
+  heroLevel: number;
+  skillPoints: number;
+  skills: Record<SkillKind, number>;
+  equip: Record<HeroKind, Record<Gear, number>>;
+  wave: number;
+  baseHP: number;
+  maxBaseHP: number;
+  heroDeaths: number;
+  extraMana: number;
+  stock: Record<TowerKind, number>;
+  heroKind: HeroKind;
+  companionKinds: HeroKind[];
+};
+
+const SUPREME_COINS = 999999999;
+const SUPREME_DAMAGE = 99999;
+
 const WORLD_INFO: Record<number, { name: string; short: string; cost: number }> = {
   1: { name: 'MUNDO 1 · PRIMITIVO', short: 'M1', cost: 0 },
   2: { name: 'MUNDO 2 · GRÉCIA ANTIGA', short: 'M2', cost: 20000 },
@@ -369,6 +419,24 @@ const WORLD_INFO: Record<number, { name: string; short: string; cost: number }> 
 };
 
 const REAL_WORLD_COST = 60000;
+
+// Cenário nos céus (escolha do Mundo Tecnológico no nível 90).
+const SKY_COLORS = {
+  bgCss: '#2f6cb8',
+  g1: 0x5aa6ee,
+  g2: 0xc4e4ff,
+  patches: [0x8cc4f6, 0xb4dcff, 0xe8f4ff, 0x7ab8f0],
+  clear1: 0xffffff,
+  clear2: 0xfff0b0,
+  ring: 0xfff0b0,
+  vignette: 0x1a3a7a,
+};
+
+const SKY_ROAD: RoadPalette = {
+  shadow: 0x5a7aa8, neon: 0xffe08a, c1: 0xd8c58a, c2: 0xe8d9a0, c3: 0xf3e6b4,
+  c4: 0xfff3c8, c5: 0xffffff, c5a: 0.5,
+  stoneA: 0xffe08a, stoneB: 0xffffff, curb: 0xffd060, curbShadow: 0x7a5a1a,
+};
 
 const ENEMY_HP_MULT = 10;
 const ENEMY_SPEED_MULT = 5;
@@ -1616,6 +1684,7 @@ class GameScene extends BaseScene {
   private heroDamage = 3;
 
   private buildMode = false;
+  private pendingBuild: { x: number; y: number } | null = null;
   private towerMenuOpen = false;
 
   private selectedTowerKind: TowerKind = 'basic';
@@ -1631,7 +1700,12 @@ class GameScene extends BaseScene {
   private heroSpeed = 205;
   private heroLegs: Phaser.GameObjects.Rectangle[] = [];
   private unlockedHeroes: HeroKind[] = ['guardiao'];
-  private heroSwapReadyAt = 0;
+  private companions: Companion[] = [];
+  private fused = false;
+  private techSnap: TechSnap | null = null;
+  private stashTowers: Tower[] = [];
+  private stashAllies: Ally[] = [];
+  private transToken = 0;
   private frameCount = 0;
   private spawnSeq = 0;
   private zones: Zone[] = [];
@@ -1643,7 +1717,6 @@ class GameScene extends BaseScene {
   private heroHitAt = 0;
   private heroInvulnUntil = 0;
   private worldObjs: Phaser.GameObjects.GameObject[] = [];
-  private auraRanks: Record<HeroKind, number> = { guardiao: 0, patrulheiro: 0, arcanista: 0 };
   private extraMana = 0;
   private maxBaseHP = 20;
   private stock: Record<TowerKind, number> = { basic: 0, rapid: 0, sniper: 0 };
@@ -1659,7 +1732,6 @@ class GameScene extends BaseScene {
   private equip: Record<HeroKind, Record<Gear, number>> = freshEquip();
   private clones: Clone[] = [];
   private cloneUntil = 0;
-  private skillReadyAt: Partial<Record<SkillKind, number>> = {};
   private tracers: {
     x1: number; y1: number; x2: number; y2: number; ttl: number;
     color?: number; w?: number; life?: number;
@@ -1719,7 +1791,12 @@ class GameScene extends BaseScene {
     this.allies = [];
     this.clones = [];
     this.cloneUntil = 0;
-    this.skillReadyAt = {};
+    this.companions = [];
+    this.fused = false;
+    this.techSnap = null;
+    this.stashTowers = [];
+    this.stashAllies = [];
+    this.transToken++;
     this.tracers = [];
     this.zones = [];
     this.spawnSeq = 0;
@@ -1735,6 +1812,7 @@ class GameScene extends BaseScene {
     this.gameOver = false;
     this.modalOpen = false;
     this.buildMode = false;
+    this.pendingBuild = null;
     this.towerMenuOpen = false;
     this.selectedTower = null;
     this.selectedTowerKind = 'basic';
@@ -1750,7 +1828,6 @@ class GameScene extends BaseScene {
     this.wave = 0;
     this.skillPoints = ex.skill;
     this.skillLevels = freshSkills();
-    this.auraRanks = { guardiao: 0, patrulheiro: 0, arcanista: 0 };
     this.heroDead = false;
     this.heroDeaths = 0;
     this.heroHitAt = 0;
@@ -1760,7 +1837,6 @@ class GameScene extends BaseScene {
 
     this.heroKind = hk;
     this.unlockedHeroes = [hk];
-    this.heroSwapReadyAt = 0;
     this.extraMana = ex.mana;
     this.maxBaseHP = 20 + ex.base * 4;
     this.baseHP = this.maxBaseHP;
@@ -1804,7 +1880,7 @@ class GameScene extends BaseScene {
       if (pointer.y < 150 || pointer.y >= 825) return;
 
       if (this.buildMode) {
-        this.placeTower(pointer.x, pointer.y);
+        this.askBuild(pointer.x, pointer.y);
         return;
       }
 
@@ -1812,7 +1888,7 @@ class GameScene extends BaseScene {
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (this.buildMode && pointer.y >= 150 && pointer.y < 825) {
+      if (this.buildMode && !this.pendingBuild && pointer.y >= 150 && pointer.y < 825) {
         this.updateBuildPreview(pointer.x, pointer.y);
       }
 
@@ -1910,7 +1986,8 @@ class GameScene extends BaseScene {
   }
 
   private paintWorld(theme: WorldTheme) {
-    const T = THEMES[theme];
+    const sky = theme === 'tech' && this.finalChoice === 'tech';
+    const T = sky ? { ...THEMES.tech, ...SKY_COLORS } : THEMES[theme];
 
     this.cameras.main.setBackgroundColor(T.bgCss);
 
@@ -1954,13 +2031,14 @@ class GameScene extends BaseScene {
       );
     }
 
-    this.paintGround(g, theme);
+    if (sky) this.paintSkyGround(g);
+    else this.paintGround(g, theme);
 
     for (const path of ALL_PATHS) {
       this.drawRoad(g, path, theme);
     }
 
-    this.paintDecor(g, theme);
+    if (!sky) this.paintDecor(g, theme);
 
     const pads = [
       { x: 35, y: 285 }, { x: 35, y: 465 }, { x: 35, y: 645 },
@@ -1994,6 +2072,41 @@ class GameScene extends BaseScene {
       v.strokeRect(
         inset, 150 + inset, WIDTH - inset * 2, 675 - inset * 2,
       );
+    }
+  }
+
+  // Céus: nuvens, brilhos e raios dourados no lugar do chão.
+  private paintSkyGround(g: Phaser.GameObjects.Graphics) {
+    for (let i = 0; i < 7; i++) {
+      const cx = 300 + (i - 3) * 130;
+
+      g.fillStyle(0xfff0b0, 0.07);
+      g.fillTriangle(300, 150, cx - 45, 825, cx + 45, 825);
+    }
+
+    for (let i = 0; i < 140; i++) {
+      const x = 8 + ((i * 97 + 23) % 584);
+      const y = 155 + ((i * 71 + 11) % 660);
+
+      if (this.isNearPath(x, y, 30)) continue;
+
+      g.fillStyle(0xffffff, 0.3 + (i % 4) * 0.12);
+      g.fillCircle(x, y, 1 + (i % 3) * 0.6);
+    }
+
+    for (let i = 0; i < 36; i++) {
+      const x = (i * 151 + 37) % WIDTH;
+      const y = 170 + ((i * 113 + 29) % 640);
+
+      if (this.isNearPath(x, y, 50)) continue;
+
+      g.fillStyle(0x8fb4e0, 0.3);
+      g.fillEllipse(x, y + 12, 90, 16);
+
+      for (let k = 0; k < 4; k++) {
+        g.fillStyle(0xffffff, 0.6);
+        g.fillEllipse(x + k * 18 - 27, y + (k % 2) * 6, 46, 24);
+      }
     }
   }
 
@@ -2166,7 +2279,9 @@ class GameScene extends BaseScene {
     path: Point[],
     theme: WorldTheme,
   ) {
-    const R = THEMES[theme].road;
+    const R = theme === 'tech' && this.finalChoice === 'tech'
+      ? SKY_ROAD
+      : THEMES[theme].road;
 
     const line = (color: number, width: number, alpha = 1) => {
       g.lineStyle(width, color, alpha);
@@ -3060,14 +3175,13 @@ class GameScene extends BaseScene {
       .setStrokeStyle(0, 0x000000, 0)
       .setDepth(6);
 
-    this.heroVisual = this.createHeroVisual(this.heroKind, 300, 220, this.equip[this.heroKind])
-      .setDepth(7);
+    this.heroVisual = this.buildActiveVisual(300, 220);
 
     this.heroLegs = this.heroVisual.getData('legs') as Phaser.GameObjects.Rectangle[];
 
     this.heroLabel = this.add.text(
       300, 185,
-      `${HERO_STATS[this.heroKind].name} · Nv. ${this.heroLevel}`,
+      `${this.heroTitle()} · Nv. ${this.heroLevel}`,
       {
         fontFamily: 'Georgia, serif',
         fontSize: '10px',
@@ -3079,6 +3193,74 @@ class GameScene extends BaseScene {
         strokeThickness: 2,
       },
     ).setOrigin(0.5).setDepth(8);
+  }
+
+  private heroTitle(): string {
+    if (this.fused) return this.finalChoice === 'tech' ? 'DEUS SUPREMO' : 'HERÓI FUNDIDO';
+
+    return HERO_STATS[this.heroKind].name;
+  }
+
+  private buildActiveVisual(x: number, y: number): Phaser.GameObjects.Container {
+    const v = this.createHeroVisual(
+      this.heroKind, x, y, this.equip[this.heroKind],
+    ).setDepth(7);
+
+    if (this.fused) {
+      const glow = this.add.circle(0, -2, 34, 0xfff0a0, 0.18)
+        .setStrokeStyle(2, 0xffe08a, 0.9)
+        .setBlendMode(Phaser.BlendModes.ADD);
+
+      v.addAt(glow, 0);
+
+      this.tweens.add({
+        targets: glow,
+        scale: 1.25,
+        alpha: 0.5,
+        duration: 700,
+        yoyo: true,
+        repeat: -1,
+      });
+
+      [0xe2574c, 0x7dff9a, 0xb08cff].forEach((col, i) => {
+        const orb = this.add.circle((i - 1) * 16, i === 1 ? -50 : -44, 5, col, 1)
+          .setStrokeStyle(1, 0xffffff, 0.9);
+
+        v.add(orb);
+
+        this.tweens.add({
+          targets: orb,
+          y: orb.y - 5,
+          duration: 500 + i * 120,
+          yoyo: true,
+          repeat: -1,
+        });
+      });
+
+      v.add(this.add.rectangle(0, -36, 22, 5, GOLD_LIGHT, 1).setStrokeStyle(1, 0x000000, 1));
+
+      if (this.finalChoice === 'tech') {
+        // Deus supremo: asas e halo divino.
+        for (const sgn of [-1, 1]) {
+          const wing = this.add.triangle(
+            sgn * 20, -10, 0, 0, sgn * 30, -22, sgn * 24, 16, 0xffffff, 0.9,
+          ).setStrokeStyle(1, 0xffe08a, 1);
+
+          v.addAt(wing, 0);
+          this.tweens.add({
+            targets: wing, scaleY: 1.18, duration: 450, yoyo: true, repeat: -1,
+          });
+        }
+
+        const halo = this.add.ellipse(0, -46, 26, 8, 0xfff0a0, 0.2)
+          .setStrokeStyle(2, 0xfff0a0, 1)
+          .setBlendMode(Phaser.BlendModes.ADD);
+
+        v.add(halo);
+      }
+    }
+
+    return v;
   }
 
   private createEnemyVisual(
@@ -3653,10 +3835,16 @@ class GameScene extends BaseScene {
 
   private closeContextMenu() {
     this.clearContextMenu();
+    this.pendingBuild = null;
     this.towerMenuOpen = false;
   }
 
   private toggleTowerMenu() {
+    if (this.finalChoice === 'tech') {
+      this.showMessage('No Mundo Tecnológico os heróis dispensam torres.');
+      return;
+    }
+
     if (this.towerMenuOpen) {
       this.closeContextMenu();
       return;
@@ -3836,7 +4024,7 @@ class GameScene extends BaseScene {
     this.towerMenuOpen = false;
 
     this.openContextPanel(
-      `${HERO_STATS[this.heroKind].name} · NÍVEL ${this.heroLevel} · PONTOS: ${this.skillPoints}`,
+      `${this.heroTitle()} · NÍVEL ${this.heroLevel} · PONTOS: ${this.skillPoints}`,
       150,
     );
 
@@ -3846,11 +4034,12 @@ class GameScene extends BaseScene {
 
     skills.forEach((skill, i) => {
       const x = xPositions[i];
-      const info = SKILL_INFO[skill];
-      const rank = this.skillLevels[skill];
+      const info = this.skillMeta(skill);
+      const rank = this.rankOf(skill);
+      const rawRank = this.skillLevels[this.rankKey(skill)];
 
       this.contextObjects.push(
-        this.makeSkillIcon(x + 17, 886, skill, rank, () => this.useSkill(skill)),
+        this.makeSkillIcon(x + 17, 886, skill, skill === 'aura' ? 1 : rank, () => this.useSkill(skill)),
       );
 
       const name = this.add.text(
@@ -3869,7 +4058,7 @@ class GameScene extends BaseScene {
       const pips = this.add.graphics().setDepth(33);
 
       for (let p = 0; p < 5; p++) {
-        pips.fillStyle(p < rank ? GOLD_LIGHT : 0x23262a, 1);
+        pips.fillStyle(p < rawRank ? GOLD_LIGHT : 0x23262a, 1);
         pips.fillRect(x + 40 + p * 10, 893, 8, 5);
         pips.lineStyle(1, 0x000000, 1);
         pips.strokeRect(x + 40 + p * 10, 893, 8, 5);
@@ -3879,8 +4068,8 @@ class GameScene extends BaseScene {
 
       const canUpgrade =
         this.skillPoints > 0 &&
-        rank < 5 &&
-        this.heroLevel >= (rank + 2);
+        rawRank < 5 &&
+        this.heroLevel >= (rawRank + 2);
 
       this.addContextButton(
         x, 906,
@@ -3905,14 +4094,12 @@ class GameScene extends BaseScene {
       this.contextObjects.push(description);
     });
 
-    if (this.unlockedHeroes.length > 1) {
-      const others = this.unlockedHeroes.filter(h => h !== this.heroKind);
-
-      others.forEach((h, i) => {
+    if (this.companions.length) {
+      this.companions.forEach((c, i) => {
         this.addContextButton(
           188 + i * 200, 966,
-          `TROCAR: ${HERO_STATS[h].name}`, '#355a52',
-          () => this.swapHero(h), 190, 17,
+          `TROCAR: ${HERO_STATS[c.kind].name}`, '#355a52',
+          () => this.swapHero(c.kind), 190, 17,
         );
       });
     } else {
@@ -3930,7 +4117,47 @@ class GameScene extends BaseScene {
     }
   }
 
-  private upgradeSkill(skill: SkillKind) {
+  // Os pontos de habilidade são compartilhados por todos os heróis:
+  // trocar de herói NUNCA exige melhorar de novo. O poder único (explosão,
+  // clones ou raios) usa a mesma pontuação em qualquer herói.
+  private rankKey(skill: SkillKind): SkillKind {
+    return skill === 'clones' || skill === 'lightning' ? 'explosion' : skill;
+  }
+
+  private rankOf(skill: SkillKind): number {
+    const raw = this.skillLevels[this.rankKey(skill)];
+
+    if (this.finalChoice === 'tech' && skill !== 'aura') return 5;
+
+    if (this.fused && skill !== 'aura') return Math.min(5, raw + 1);
+
+    return raw;
+  }
+
+  private skillMeta(skill: SkillKind): { name: string; description: string; mana: number } {
+    if (skill === 'strike') {
+      return this.fused ? STRIKE_INFO.fused : STRIKE_INFO[this.heroKind];
+    }
+
+    if (skill === 'aura') {
+      return {
+        name: 'AURA',
+        description: this.fused
+          ? 'Passiva: reforça TODAS as torres (x1,5).'
+          : `Passiva: reforça só as torres ${TOWER_STATS[HERO_STATS[this.heroKind].specialty].name}.`,
+        mana: 0,
+      };
+    }
+
+    return SKILL_INFO[skill];
+  }
+
+  private powerMult(): number {
+    return (this.fused ? 1.5 : 1) * (this.finalChoice === 'tech' ? 200 : 1);
+  }
+
+  private upgradeSkill(rawSkill: SkillKind) {
+    const skill = this.rankKey(rawSkill);
     const rank = this.skillLevels[skill];
 
     if (rank >= 5) {
@@ -3952,7 +4179,7 @@ class GameScene extends BaseScene {
     this.skillLevels[skill]++;
 
     this.showMessage(
-      `${SKILL_INFO[skill].name} melhorada para o nível ${this.skillLevels[skill]}.`,
+      `${this.skillMeta(rawSkill).name} melhorada para o nível ${this.skillLevels[skill]}.`,
     );
 
     this.openHeroMenu();
@@ -4056,6 +4283,11 @@ class GameScene extends BaseScene {
   private beginBuild(kind: TowerKind) {
     if (this.gameOver) return;
 
+    if (this.finalChoice === 'tech') {
+      this.showMessage('No Mundo Tecnológico os heróis dispensam torres.');
+      return;
+    }
+
     this.closeContextMenu();
     this.selectedTowerKind = kind;
     this.buildMode = true;
@@ -4084,6 +4316,7 @@ class GameScene extends BaseScene {
 
   private cancelBuild() {
     this.buildMode = false;
+    this.pendingBuild = null;
     this.buildPreview.clear();
     this.buildPreview.setVisible(false);
     this.buildInfoText.setVisible(false);
@@ -4157,6 +4390,51 @@ class GameScene extends BaseScene {
     );
   }
 
+  // Toque no mapa: fixa a sombra no local e pergunta antes de construir.
+  private askBuild(x: number, y: number) {
+    if (!this.buildMode) return;
+
+    const kind = this.selectedTowerKind;
+    const stats = TOWER_STATS[kind];
+
+    if (this.coins < stats.cost && this.stock[kind] <= 0) {
+      this.showMessage('Moedas insuficientes para construir esta torre.');
+      return;
+    }
+
+    if (!this.isValidBuildLocation(x, y, kind)) {
+      this.showMessage(
+        'Local inválido: perto demais de outra torre ou da entrada dos monstros.',
+      );
+      this.updateBuildPreview(x, y);
+      return;
+    }
+
+    this.pendingBuild = { x, y };
+    this.updateBuildPreview(x, y);
+
+    this.openContextPanel(`CONSTRUIR ${stats.name} NESTE LOCAL?`, 80);
+    // openContextPanel limpa o menu, mas não deve perder o local escolhido.
+    this.pendingBuild = { x, y };
+
+    const price = this.stock[kind] > 0 ? 'do estoque' : `${stats.cost} moedas`;
+
+    this.addContextButton(
+      187, 876, `CONSTRUIR · ${price}`, '#2f6140',
+      () => {
+        const p = this.pendingBuild;
+        if (p) this.placeTower(p.x, p.y);
+      },
+      200, 30,
+    );
+
+    this.addContextButton(
+      398, 876, 'CANCELAR', '#7a352c',
+      () => this.closeContextMenu(),
+      150, 30,
+    );
+  }
+
   private placeTower(x: number, y: number) {
     if (!this.buildMode) return;
 
@@ -4220,12 +4498,22 @@ class GameScene extends BaseScene {
       onComplete: () => ring.destroy(),
     });
 
-    this.cancelBuild();
-    this.openTowerMenu(tower);
+    // Continua em modo de construção: a sombra segue o dedo para a próxima.
+    this.closeContextMenu();
 
-    this.showMessage(
-      `${stats.name} construída! Selecione a torre para melhorar ou vender.`,
-    );
+    const canAgain = this.coins >= stats.cost || this.stock[kind] > 0;
+
+    if (canAgain) {
+      const pointer = this.input.activePointer;
+      this.updateBuildPreview(pointer.x, pointer.y);
+
+      this.showMessage(
+        `${stats.name} construída! Toque em outro local para construir mais ou no botão de construir para sair.`,
+      );
+    } else {
+      this.cancelBuild();
+      this.showMessage(`${stats.name} construída! Moedas acabaram.`);
+    }
 
     this.refreshInterface();
   }
@@ -4598,6 +4886,10 @@ class GameScene extends BaseScene {
       blockers.push({ x: c.x, y: c.y, r: 13, soft: true });
     }
 
+    for (const c of this.companions) {
+      blockers.push({ x: c.x, y: c.y, r: 14, soft: true });
+    }
+
     this.frameCount++;
     const list = this.enemies;
     const crowded = list.length > 30;
@@ -4957,6 +5249,7 @@ class GameScene extends BaseScene {
   private hurtHero(dmg: number) {
     const now = this.time.now;
 
+    if (this.finalChoice === 'tech') return;
     if (this.heroDead || now < this.heroInvulnUntil) return;
 
     this.heroHp -= dmg;
@@ -5454,7 +5747,7 @@ class GameScene extends BaseScene {
     if (target) {
       this.heroAttackCooldown = this.heroAttackRate * (this.time.now < this.cloneUntil ? 0.7 : 1);
       this.fireHeroProjectile(target);
-      this.damageEnemy(target, this.heroDamage);
+      this.hitTarget(target, this.heroDamage, this.hero.x, this.hero.y);
 
       this.tweens.add({
         targets: this.heroVisual,
@@ -5525,7 +5818,7 @@ class GameScene extends BaseScene {
       });
     }
 
-    this.heroLabel.setText(`${HERO_STATS[this.heroKind].name} · Nv. ${this.heroLevel}`);
+    this.heroLabel.setText(`${this.heroTitle()} · Nv. ${this.heroLevel}`);
   }
 
   // ==================================================
@@ -5540,8 +5833,22 @@ class GameScene extends BaseScene {
       return;
     }
 
-    const rank = this.skillLevels[skill];
-    const info = SKILL_INFO[skill];
+    const info = this.skillMeta(skill);
+
+    if (skill === 'aura') {
+      const names = this.fused
+        ? 'todas as torres'
+        : this.presentHeroes()
+          .map(h => TOWER_STATS[HERO_STATS[h].specialty].name)
+          .join(' e ');
+
+      this.showMessage(
+        `AURA é passiva e já está ativa (Nv.${this.skillLevels.aura}) em: ${names}.`,
+      );
+      return;
+    }
+
+    const rank = this.rankOf(skill);
 
     if (rank === 0) {
       this.showMessage(
@@ -5550,31 +5857,15 @@ class GameScene extends BaseScene {
       return;
     }
 
-    if (skill === 'aura') {
-      this.showMessage(
-        `${info.name} é passiva e já está ativa (Nv.${rank}) em todas as torres ${TOWER_STATS[HERO_STATS[this.heroKind].specialty].name}.`,
-      );
-      return;
-    }
-
-    const now = this.time.now;
-    const ready = this.skillReadyAt[skill] ?? 0;
-
-    if (now < ready) {
-      this.showMessage(
-        `${info.name} em recarga: ${Math.ceil((ready - now) / 1000)}s.`,
-      );
-      return;
-    }
-
-    const cost = Math.max(5, info.mana - (rank - 1) * 3);
+    // Sem tempo de recarga: o único limite é a mana.
+    const cost = this.finalChoice === 'tech'
+      ? 0
+      : Math.max(5, info.mana - (rank - 1) * 3);
 
     if (this.mana < cost) {
       this.showMessage('Mana insuficiente para esta habilidade.');
       return;
     }
-
-    const before = this.mana;
 
     switch (skill) {
       case 'explosion':
@@ -5596,11 +5887,6 @@ class GameScene extends BaseScene {
         break;
     }
 
-    // A recarga só começa se a habilidade realmente foi usada.
-    if (this.mana < before) {
-      this.skillReadyAt[skill] = now + SKILL_COOLDOWN[skill];
-    }
-
     this.refreshInterface();
   }
 
@@ -5611,8 +5897,10 @@ class GameScene extends BaseScene {
     }
 
     this.mana -= cost;
-    const radius = 95 + rank * 6;
-    const damage = 3 + Math.floor(this.heroLevel * 0.8) + rank * 2;
+    const radius = (95 + rank * 6) * (this.finalChoice === 'tech' ? 3 : 1);
+    const damage = Math.round(
+      (3 + Math.floor(this.heroLevel * 0.8) + rank * 2) * this.powerMult(),
+    );
     let hitCount = 0;
 
     for (const enemy of [...this.enemies]) {
@@ -5673,59 +5961,377 @@ class GameScene extends BaseScene {
     );
   }
 
+  // ---------- GOLPE HEROICO: o poder final, único de cada herói ----------
+
+  private ultDamage(rank: number): number {
+    return (40 + this.heroLevel * 8 + rank * 25)
+      * (this.finalChoice === 'tech' ? 200 : 1);
+  }
+
+  // Ponto com mais inimigos juntos (alvo das chuvas e do meteoro).
+  private densestPoint(radius: number): { x: number; y: number } {
+    let best: { x: number; y: number; n: number } | null = null;
+
+    for (const a of this.enemies) {
+      if (!a.alive) continue;
+
+      let n = 0;
+
+      for (const b of this.enemies) {
+        if (
+          b.alive &&
+          Phaser.Math.Distance.Between(a.body.x, a.body.y, b.body.x, b.body.y) <= radius
+        ) n++;
+      }
+
+      if (!best || n > best.n) best = { x: a.body.x, y: a.body.y, n };
+    }
+
+    return best ? { x: best.x, y: best.y } : { x: this.hero.x, y: this.hero.y };
+  }
+
   private useHeroStrike(cost: number, rank: number) {
     if (this.mana < cost) return;
 
-    let target: Enemy | undefined;
-    let closest = this.heroRange + 80;
-
-    for (const enemy of this.enemies) {
-      if (!enemy.alive) continue;
-
-      const distance = Phaser.Math.Distance.Between(
-        this.hero.x, this.hero.y,
-        enemy.body.x, enemy.body.y,
-      );
-
-      if (distance < closest) {
-        closest = distance;
-        target = enemy;
-      }
-    }
-
-    if (!target) {
-      this.showMessage('Não há inimigos próximos para o Golpe Heroico.');
+    if (!this.enemies.some(e => e.alive)) {
+      this.showMessage('Não há inimigos em campo para o golpe final.');
       return;
     }
 
     this.mana -= cost;
 
-    const effect = this.add.circle(
-      target.body.x, target.body.y, 22 + rank * 3, 0xffd16b, 0.65,
-    ).setBlendMode(Phaser.BlendModes.ADD).setDepth(13);
+    const dmg = this.ultDamage(rank);
+
+    if (this.fused) {
+      this.ultSlam(dmg, rank);
+      this.time.delayedCall(450, () => { if (!this.gameOver) this.ultArrows(dmg, rank); });
+      this.time.delayedCall(1300, () => { if (!this.gameOver) this.ultMeteor(dmg, rank); });
+
+      this.baseHP = Math.min(this.maxBaseHP, this.baseHP + 3 + rank);
+      this.floatText(this.hero.x, this.hero.y - 70, 'JUÍZO FINAL!', '#fff0a0', 18);
+      this.showMessage('JUÍZO FINAL! Os três poderes se unem.');
+      return;
+    }
+
+    if (this.heroKind === 'guardiao') {
+      this.ultSlam(dmg, rank);
+      this.floatText(this.hero.x, this.hero.y - 70, 'GOLPE TITÂNICO!', '#ffd16b', 16);
+    } else if (this.heroKind === 'patrulheiro') {
+      this.ultArrows(dmg, rank);
+      this.floatText(this.hero.x, this.hero.y - 70, 'CHUVA DE FLECHAS!', '#b8ff9a', 16);
+    } else {
+      this.ultMeteor(dmg, rank);
+      this.floatText(this.hero.x, this.hero.y - 70, 'METEORO ARCANO!', '#d0b0ff', 16);
+    }
+  }
+
+  // Guardião: esmaga o chão com uma onda de choque dourada.
+  private ultSlam(dmg: number, rank: number) {
+    const cx = this.hero.x;
+    const cy = this.hero.y;
+    const radius = 150 + rank * 12;
+    const now = this.time.now;
+
+    this.cameras.main.flash(200, 255, 235, 170);
+    this.cameras.main.shake(420, 0.014);
+
+    const core = this.add.circle(cx, cy, 30, 0xffffff, 0.95)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(14);
 
     this.tweens.add({
-      targets: effect,
+      targets: core,
+      scale: radius / 30 * 0.7,
       alpha: 0,
-      scale: 1.8,
-      duration: 260,
-      onComplete: () => effect.destroy(),
+      duration: 320,
+      onComplete: () => core.destroy(),
     });
 
-    const slash = this.add.rectangle(
-      target.body.x, target.body.y, 4, 46, 0xffffff, 0.95,
-    ).setRotation(0.8).setDepth(13);
+    const beam = this.add.rectangle(cx, cy - 260, 80, 520, 0xfff2b0, 0.6)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(14);
 
     this.tweens.add({
-      targets: slash,
-      scaleY: 0.1,
+      targets: beam,
+      scaleX: 0,
       alpha: 0,
-      duration: 220,
-      onComplete: () => slash.destroy(),
+      duration: 420,
+      onComplete: () => beam.destroy(),
     });
 
-    this.damageEnemy(target, 12 + this.heroLevel * 3 + rank * 5);
-    this.showMessage('Golpe Heroico executado!');
+    for (let i = 0; i < 3; i++) {
+      const ring = this.add.circle(cx, cy, 20, 0xffd16b, 0.16)
+        .setStrokeStyle(6 - i * 2, i === 0 ? 0xffffff : 0xffc04a, 0.95)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(13);
+
+      this.tweens.add({
+        targets: ring,
+        scale: radius / 20 * (1 + i * 0.12),
+        alpha: 0,
+        duration: 560,
+        delay: i * 110,
+        ease: 'Cubic.easeOut',
+        onComplete: () => ring.destroy(),
+      });
+    }
+
+    // rachaduras no chão
+    const cracks = this.add.graphics().setDepth(4);
+
+    for (let k = 0; k < 11; k++) {
+      const ang = (k / 11) * Math.PI * 2 + Math.random() * 0.4;
+      const len = radius * (0.55 + Math.random() * 0.4);
+      let px = cx;
+      let py = cy;
+
+      for (let seg = 1; seg <= 5; seg++) {
+        const a2 = ang + (Math.random() - 0.5) * 0.5;
+        const nx = cx + Math.cos(a2) * len * seg / 5;
+        const ny = cy + Math.sin(a2) * len * seg / 5 * 0.7;
+
+        cracks.lineStyle(5, 0xffc04a, 0.35);
+        cracks.lineBetween(px, py, nx, ny);
+        cracks.lineStyle(2, 0x120c06, 0.95);
+        cracks.lineBetween(px, py, nx, ny);
+
+        px = nx;
+        py = ny;
+      }
+    }
+
+    this.tweens.add({
+      targets: cracks,
+      alpha: 0,
+      delay: 700,
+      duration: 700,
+      onComplete: () => cracks.destroy(),
+    });
+
+    // pedras voando
+    for (let k = 0; k < 16; k++) {
+      const rock = this.add.rectangle(
+        cx, cy, 5 + Math.random() * 6, 5 + Math.random() * 6, 0x6b5a3a, 1,
+      ).setDepth(15).setRotation(Math.random() * 3);
+
+      this.tweens.add({
+        targets: rock,
+        x: cx + Phaser.Math.Between(-radius, radius),
+        y: cy - Phaser.Math.Between(40, 140),
+        alpha: 0,
+        rotation: rock.rotation + Phaser.Math.Between(-6, 6),
+        duration: 650,
+        ease: 'Quad.easeOut',
+        onComplete: () => rock.destroy(),
+      });
+    }
+
+    let hits = 0;
+
+    for (const e of [...this.enemies]) {
+      if (!e.alive) continue;
+
+      if (Phaser.Math.Distance.Between(cx, cy, e.body.x, e.body.y) <= radius) {
+        this.damageEnemy(e, dmg);
+        hits++;
+
+        if (e.alive) {
+          e.stunUntil = Math.max(e.stunUntil, now + (e.tier === 'boss' ? 700 : 1500));
+        }
+      }
+    }
+
+    if (!this.fused) this.showMessage(`GOLPE TITÂNICO! ${hits} inimigo(s) esmagado(s).`);
+  }
+
+  // Patrulheiro: chuva de flechas luminosas sobre o maior grupo.
+  private ultArrows(dmg: number, rank: number) {
+    const c = this.densestPoint(120);
+    const spread = 130 + rank * 8;
+    const count = 20 + rank * 2;
+
+    this.cameras.main.flash(160, 190, 255, 170);
+
+    const mark = this.add.circle(c.x, c.y, spread, 0x9aff7a, 0.1)
+      .setStrokeStyle(3, 0xd8ffc0, 0.9)
+      .setDepth(3);
+
+    this.tweens.add({
+      targets: mark,
+      alpha: 0,
+      duration: count * 55 + 400,
+      onComplete: () => mark.destroy(),
+    });
+
+    for (let i = 0; i < count; i++) {
+      this.time.delayedCall(i * 55, () => {
+        if (this.gameOver) return;
+
+        const ix = c.x + Phaser.Math.Between(-spread, spread);
+        const iy = c.y + Phaser.Math.Between(-Math.round(spread * 0.7), Math.round(spread * 0.7));
+
+        const arrow = this.add.rectangle(ix - 20, iy - 360, 4, 38, 0xe8ffd0, 1)
+          .setRotation(0.05)
+          .setDepth(14);
+
+        const trail = this.add.rectangle(ix - 20, iy - 360, 9, 90, 0x7dff7a, 0.35)
+          .setRotation(0.05)
+          .setBlendMode(Phaser.BlendModes.ADD)
+          .setDepth(13);
+
+        this.tweens.add({
+          targets: [arrow, trail],
+          x: ix,
+          y: iy,
+          duration: 260,
+          ease: 'Quad.easeIn',
+          onComplete: () => {
+            arrow.destroy();
+            trail.destroy();
+
+            const burst = this.add.circle(ix, iy, 10, 0xb8ff9a, 0.7)
+              .setBlendMode(Phaser.BlendModes.ADD)
+              .setDepth(13);
+
+            this.tweens.add({
+              targets: burst,
+              scale: 4,
+              alpha: 0,
+              duration: 220,
+              onComplete: () => burst.destroy(),
+            });
+
+            for (const e of [...this.enemies]) {
+              if (!e.alive) continue;
+
+              if (Phaser.Math.Distance.Between(ix, iy, e.body.x, e.body.y) <= 50) {
+                this.damageEnemy(e, Math.max(1, Math.round(dmg * 0.35)));
+              }
+            }
+          },
+        });
+      });
+    }
+
+    if (!this.fused) this.showMessage('CHUVA DE FLECHAS! O céu se enche de luz.');
+  }
+
+  // Arcanista: meteoro colossal com raios, explosão e lentidão.
+  private ultMeteor(dmg: number, rank: number) {
+    const c = this.densestPoint(150);
+    const radius = 140 + rank * 10;
+
+    const warn = this.add.circle(c.x, c.y, radius, 0x9a6bff, 0.12)
+      .setStrokeStyle(3, 0xd0b0ff, 0.9)
+      .setDepth(3);
+
+    this.tweens.add({
+      targets: warn,
+      alpha: 0.4,
+      duration: 160,
+      yoyo: true,
+      repeat: 3,
+    });
+
+    const sx = c.x + 120;
+    const sy = c.y - 520;
+
+    const meteor = this.add.circle(sx, sy, 26, 0xc59bff, 1)
+      .setStrokeStyle(5, 0xffffff, 1)
+      .setDepth(15);
+
+    const glow = this.add.circle(sx, sy, 54, 0x7a4bff, 0.35)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(14);
+
+    const tail = this.add.rectangle(sx + 18, sy - 78, 20, 170, 0xb48cff, 0.5)
+      .setRotation(Math.atan2(120, 520))
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(14);
+
+    this.tweens.add({
+      targets: [meteor, glow],
+      x: c.x,
+      y: c.y,
+      duration: 700,
+      ease: 'Quad.easeIn',
+    });
+
+    this.tweens.add({
+      targets: tail,
+      x: c.x + 18,
+      y: c.y - 78,
+      duration: 700,
+      ease: 'Quad.easeIn',
+      onComplete: () => {
+        meteor.destroy();
+        glow.destroy();
+        tail.destroy();
+        warn.destroy();
+
+        if (this.gameOver) return;
+
+        const now = this.time.now;
+
+        this.cameras.main.flash(320, 190, 150, 255);
+        this.cameras.main.shake(520, 0.016);
+
+        const core = this.add.circle(c.x, c.y, 40, 0xffffff, 0.95)
+          .setBlendMode(Phaser.BlendModes.ADD)
+          .setDepth(16);
+
+        this.tweens.add({
+          targets: core,
+          scale: radius / 40 * 0.8,
+          alpha: 0,
+          duration: 380,
+          onComplete: () => core.destroy(),
+        });
+
+        for (let i = 0; i < 3; i++) {
+          const ring = this.add.circle(c.x, c.y, 20, 0x9a6bff, 0.18)
+            .setStrokeStyle(6 - i * 2, i === 0 ? 0xffffff : 0xb48cff, 0.95)
+            .setBlendMode(Phaser.BlendModes.ADD)
+            .setDepth(13);
+
+          this.tweens.add({
+            targets: ring,
+            scale: radius / 20 * (1 + i * 0.12),
+            alpha: 0,
+            duration: 620,
+            delay: i * 100,
+            ease: 'Cubic.easeOut',
+            onComplete: () => ring.destroy(),
+          });
+        }
+
+        const inRange = this.enemies.filter(e =>
+          e.alive &&
+          Phaser.Math.Distance.Between(c.x, c.y, e.body.x, e.body.y) <= radius,
+        );
+
+        inRange.slice(0, 7).forEach(e => {
+          this.drawBolt(
+            c.x + Phaser.Math.Between(-30, 30), c.y - 420,
+            e.body.x, e.body.y - 6,
+          );
+        });
+
+        for (const e of inRange) {
+          if (!e.alive) continue;
+
+          this.damageEnemy(e, Math.round(dmg * 1.3));
+
+          if (e.alive) e.slowUntil = Math.max(e.slowUntil, now + 2500);
+        }
+
+        this.addZone('ice', c.x, c.y, 70, now, 0);
+
+        if (!this.fused) {
+          this.showMessage(`METEORO ARCANO! ${inRange.length} inimigo(s) atingido(s).`);
+        }
+      },
+    });
   }
 
   private regenerateMana(delta: number) {
@@ -5800,7 +6406,7 @@ class GameScene extends BaseScene {
     const now = this.time.now;
     const shield = this.shieldUntil > now;
 
-    this.coinText.setText(`${this.coins}`);
+    this.coinText.setText(this.finalChoice === 'tech' ? '∞' : `${this.coins}`);
 
     this.baseText.setText(
       `FORTALEZA  ${this.baseHP} / ${this.maxBaseHP}${shield ? '  ·  ESCUDO' : ''}`,
@@ -6046,6 +6652,8 @@ class GameScene extends BaseScene {
       this.worldOverlay.setFillStyle(0x7a8088, 0.06);
     } else if (this.worldLevel === 2) {
       this.worldOverlay.setFillStyle(0xf0d28a, 0.05);
+    } else if (this.finalChoice === 'tech') {
+      this.worldOverlay.setFillStyle(0xfff0b0, 0.05);
     } else if (this.worldLevel === 3) {
       this.worldOverlay.setFillStyle(0x3ccfff, 0.04);
     } else {
@@ -6053,15 +6661,29 @@ class GameScene extends BaseScene {
     }
   }
 
-  // Aura passiva e permanente do herói em campo: reforça SÓ as torres da
-  // especialidade dele. O nível de aura de cada herói fica guardado.
+  // Heróis presentes no campo (o ativo + os companheiros).
+  private presentHeroes(): HeroKind[] {
+    return [this.heroKind, ...this.companions.map(c => c.kind)];
+  }
+
+  // Aura passiva e permanente. Cada herói reforça SÓ o tipo de torre dele
+  // (Guardião→Guardiã, Patrulheiro→Besteira, Arcanista→Arcana). O herói
+  // fundido reforça todas, com bônus x1,5. Funciona desde o início e melhora
+  // a cada nível de AURA (compartilhado entre os heróis).
   private auraFor(kind: TowerKind): AuraBoost {
-    if (HERO_STATS[this.heroKind].specialty !== kind) return null;
+    const mine = this.fused
+      || this.presentHeroes().some(h => HERO_STATS[h].specialty === kind);
+
+    if (!mine) return null;
 
     const rank = this.skillLevels.aura;
-    if (rank <= 0) return null;
+    const mult = this.fused ? 1.5 : 1;
 
-    return { dmg: 1 + 0.12 * rank, spd: 1 + 0.1 * rank, rank };
+    return {
+      dmg: 1 + 0.1 * (rank + 1) * mult,
+      spd: 1 + 0.08 * (rank + 1) * mult,
+      rank,
+    };
   }
 
   private updateAura() {
@@ -6095,21 +6717,35 @@ class GameScene extends BaseScene {
 
     const eq = this.equip[this.heroKind];
 
-    this.heroDamage = st.damage + (lvl - 1) + eq.weapon * 2;
-    this.heroRange = st.range + (lvl - 1) * 5 + eq.weapon * 4;
-    this.heroAttackRate = st.attackRate;
-    this.heroSpeed = st.speed + eq.armor * 8;
+    const f = this.fused;
 
-    this.maxMana = 100 + st.manaBonus + (lvl - 1) * 5
+    this.heroDamage = (f ? 12 : st.damage) + (lvl - 1) + eq.weapon * 2;
+    this.heroRange = (f ? 160 : st.range) + (lvl - 1) * 5 + eq.weapon * 4;
+    this.heroAttackRate = f ? 360 : st.attackRate;
+    this.heroSpeed = (f ? 255 : st.speed) + eq.armor * 8;
+
+    this.maxMana = 100 + (f ? 60 : st.manaBonus) + (lvl - 1) * 5
       + this.extraMana * 25 + eq.relic * 10;
-    this.manaRegen = 8 + eq.relic * 1.5;
+    this.manaRegen = 8 + eq.relic * 1.5 + (f ? 4 : 0);
     this.mana = Math.min(this.mana, this.maxMana);
+
+    // Mundo Tecnológico: heróis com poder supremo.
+    if (this.finalChoice === 'tech') {
+      this.heroDamage = SUPREME_DAMAGE;
+      this.heroRange = 440;
+      this.heroAttackRate = 140;
+      this.heroSpeed = Math.max(this.heroSpeed, 300);
+    }
+
     this.applyHeroHp();
   }
 
   private applyHeroHp() {
     const eq = this.equip[this.heroKind];
-    const max = HERO_HP[this.heroKind] + (this.heroLevel - 1) * 15 + eq.armor * 40;
+    const baseHp = this.fused
+      ? HERO_HP.guardiao + HERO_HP.patrulheiro + HERO_HP.arcanista
+      : HERO_HP[this.heroKind];
+    const max = baseHp + (this.heroLevel - 1) * 15 + eq.armor * 40;
     const ratio = this.heroMaxHp > 0 ? this.heroHp / this.heroMaxHp : 1;
 
     this.heroMaxHp = max;
@@ -6119,43 +6755,308 @@ class GameScene extends BaseScene {
     }
   }
 
+  private makeCompanionVisual(kind: HeroKind, x: number, y: number) {
+    const v = this.createHeroVisual(kind, x, y, this.equip[kind]).setDepth(7);
+
+    v.setSize(46, 62);
+    v.setInteractive({ useHandCursor: true });
+    v.on('pointerdown', () => {
+      if (this.gameOver || this.modalOpen) return;
+      this.swapHero(kind);
+    });
+
+    return v;
+  }
+
+  private spawnCompanion(kind: HeroKind) {
+    const slot = this.companions.length;
+    const x = this.hero.x + (slot === 0 ? -54 : 54);
+    const y = Math.min(815, this.hero.y + 24);
+
+    const visual = this.makeCompanionVisual(kind, x, y);
+
+    const label = this.add.text(x, y - 42, HERO_STATS[kind].name, {
+      fontFamily: 'Georgia, serif',
+      fontSize: '9px',
+      color: '#cfe8d8',
+      fontStyle: 'bold',
+      backgroundColor: '#0b0d10b0',
+      padding: { x: 4, y: 1 },
+    }).setOrigin(0.5).setDepth(8);
+
+    this.companions.push({
+      kind,
+      visual,
+      legs: visual.getData('legs') as Phaser.GameObjects.Rectangle[],
+      label,
+      x,
+      y,
+      cd: 0,
+      slot,
+    });
+
+    const ring = this.add.circle(x, y, 18, 0xfff0a0, 0.3)
+      .setStrokeStyle(3, GOLD_LIGHT, 0.9)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(13);
+
+    this.tweens.add({
+      targets: ring,
+      scale: 4,
+      alpha: 0,
+      duration: 600,
+      onComplete: () => ring.destroy(),
+    });
+  }
+
+  // Companheiros: lutam sozinhos ao lado do herói ativo.
+  private updateCompanions(delta: number) {
+    if (!this.companions.length) return;
+
+    const now = this.time.now;
+    const offsets = [{ x: -54, y: 24 }, { x: 54, y: 24 }];
+    const shotColor: Record<HeroKind, number> = {
+      guardiao: 0xf0dd9f,
+      patrulheiro: 0xb8ff9a,
+      arcanista: 0xd09fff,
+    };
+
+    for (const c of this.companions) {
+      const st = HERO_STATS[c.kind];
+      const eq = this.equip[c.kind];
+      const supreme = this.finalChoice === 'tech';
+      const range = supreme ? 440 : st.range + (this.heroLevel - 1) * 5 + eq.weapon * 4;
+      const speed = st.speed + eq.armor * 8;
+
+      let target: Enemy | undefined;
+      let best = Infinity;
+
+      for (const e of this.enemies) {
+        if (!e.alive) continue;
+
+        if (
+          Phaser.Math.Distance.Between(
+            e.body.x, e.body.y, this.hero.x, this.hero.y,
+          ) > 260
+        ) continue;
+
+        const d = Phaser.Math.Distance.Between(c.x, c.y, e.body.x, e.body.y);
+
+        if (d < best) {
+          best = d;
+          target = e;
+        }
+      }
+
+      let destX: number;
+      let destY: number;
+      let stop: number;
+
+      if (target) {
+        destX = target.body.x;
+        destY = target.body.y;
+        stop = range * 0.7;
+      } else {
+        const o = offsets[c.slot % 2];
+        destX = this.hero.x + o.x;
+        destY = this.hero.y + o.y;
+        stop = 6;
+      }
+
+      const dx = destX - c.x;
+      const dy = destY - c.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      let moved = false;
+
+      if (dist > 600) {
+        c.x = this.hero.x + offsets[c.slot % 2].x;
+        c.y = this.hero.y + offsets[c.slot % 2].y;
+      } else if (dist > stop) {
+        const step = Math.min(speed * delta / 1000, dist - stop);
+        c.x += dx / dist * step;
+        c.y = Phaser.Math.Clamp(c.y + dy / dist * step, 175, 815);
+        moved = true;
+
+        if (Math.abs(dx) > 2) c.visual.setScale(dx < 0 ? -1 : 1, 1);
+      }
+
+      c.visual.setPosition(c.x, c.y);
+      c.label.setPosition(c.x, c.y - 42);
+      this.animateLegs(c.legs, now / 70, moved);
+
+      c.cd -= delta;
+
+      if (target && c.cd <= 0 && best <= range) {
+        c.cd = supreme ? 140 : st.attackRate;
+
+        const shot = this.add.rectangle(c.x, c.y - 7, 4, 15, shotColor[c.kind])
+          .setRotation(-0.4)
+          .setDepth(12);
+
+        this.tweens.add({
+          targets: shot,
+          x: target.body.x,
+          y: target.body.y,
+          duration: 130,
+          onComplete: () => shot.destroy(),
+        });
+
+        this.hitTarget(
+          target,
+          supreme
+            ? SUPREME_DAMAGE
+            : Math.max(1, Math.round((st.damage + (this.heroLevel - 1) + eq.weapon * 2) * 0.8)),
+          c.x,
+          c.y,
+        );
+      }
+    }
+  }
+
+  // Troca o herói ativo por um companheiro (sem tempo de espera).
   private swapHero(kind: HeroKind) {
-    if (kind === this.heroKind || !this.unlockedHeroes.includes(kind)) return;
+    const comp = this.companions.find(c => c.kind === kind);
+
+    if (!comp || this.fused || kind === this.heroKind) return;
 
     if (this.heroDead) {
       this.showMessage('Reviva o herói antes de trocar.');
       return;
     }
 
-    const now = this.time.now;
+    const old = this.heroKind;
+    const hx = this.hero.x;
+    const hy = this.hero.y;
 
-    if (now < this.heroSwapReadyAt) {
-      this.showMessage(
-        `Troca de herói em recarga: ${Math.ceil((this.heroSwapReadyAt - now) / 1000)}s.`,
-      );
-      return;
-    }
-
-    const x = this.hero.x;
-    const y = this.hero.y;
-
-    // Cada herói guarda o próprio nível de aura.
-    this.auraRanks[this.heroKind] = this.skillLevels.aura;
-    this.skillLevels.aura = this.auraRanks[kind];
+    // Os dois trocam de lugar.
+    this.hero.setPosition(comp.x, comp.y);
+    comp.x = hx;
+    comp.y = hy;
 
     this.killVisual(this.heroVisual);
     this.heroKind = kind;
-    this.heroVisual = this.createHeroVisual(kind, x, y, this.equip[kind]).setDepth(7);
+    this.heroVisual = this.buildActiveVisual(this.hero.x, this.hero.y);
     this.heroLegs = this.heroVisual.getData('legs') as Phaser.GameObjects.Rectangle[];
 
-    this.applyHeroStats();
-    this.heroLabel.setText(`${HERO_STATS[kind].name} · Nv. ${this.heroLevel}`);
+    this.killVisual(comp.visual);
+    comp.kind = old;
+    comp.visual = this.makeCompanionVisual(old, comp.x, comp.y);
+    comp.legs = comp.visual.getData('legs') as Phaser.GameObjects.Rectangle[];
+    comp.label.setText(HERO_STATS[old].name).setPosition(comp.x, comp.y - 42);
+    this.restyleAllies();
 
-    // Evita abuso: a troca de herói tem recarga de 30s.
-    this.heroSwapReadyAt = now + 30000;
+    this.applyHeroStats();
+    this.heroLabel
+      .setText(`${this.heroTitle()} · Nv. ${this.heroLevel}`)
+      .setPosition(this.hero.x, this.hero.y - 42);
+
+    const ring = this.add.circle(this.hero.x, this.hero.y, 18, 0xfff0a0, 0.3)
+      .setStrokeStyle(3, GOLD_LIGHT, 0.9)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(13);
+
+    this.tweens.add({
+      targets: ring,
+      scale: 4,
+      alpha: 0,
+      duration: 500,
+      onComplete: () => ring.destroy(),
+    });
 
     this.closeContextMenu();
     this.showMessage(`${HERO_STATS[kind].name} assumiu o comando. Nível e habilidades mantidos.`);
+    this.refreshInterface();
+  }
+
+  // ---------- fusão (Mundo Real) ----------
+
+  private canFuse(): boolean {
+    return this.finalChoice !== null && !this.fused && this.companions.length >= 2;
+  }
+
+  private openFusionOffer() {
+    const god = this.finalChoice === 'tech';
+
+    const body = god
+      ? 'Nos céus, seus três heróis podem se fundir em um DEUS SUPREMO.\n\n' +
+        'O deus soma as habilidades dos três com poder divino: golpes que varrem o campo, ' +
+        'aura radiante, vida e mana enormes e o golpe final JUÍZO FINAL.\n\n' +
+        'A fusão é permanente. Você também pode ascender depois, no painel do herói.'
+      : 'No Mundo Real, seus três heróis podem se fundir em UM só.\n\n' +
+        'O herói fundido soma as habilidades dos três, com poderes mais fortes (x1,5), ' +
+        'aura em TODAS as torres, vida e mana maiores e o golpe final JUÍZO FINAL.\n\n' +
+        'A fusão é permanente. Você também pode fundir depois, no painel do herói.';
+
+    this.openModal(god ? 'ASCENDER A DEUS SUPREMO?' : 'FUNDIR OS HERÓIS?', body, [
+      {
+        label: god ? 'ASCENDER AGORA' : 'FUNDIR AGORA',
+        color: '#8a6a22',
+        action: () => this.fuseHeroes(),
+      },
+      { label: 'DEPOIS', color: '#3a4046', action: () => this.closeModal() },
+    ]);
+  }
+
+  private fuseHeroes() {
+    if (!this.canFuse()) return;
+
+    if (this.heroDead) {
+      this.closeModal();
+      this.showMessage('Reviva o herói antes de fundir.');
+      return;
+    }
+
+    // A fusão herda o melhor armamento dos três (+1, máx. 5).
+    for (const slot of GEAR_SLOTS) {
+      const top = Math.max(...HERO_ORDER.map(h => this.equip[h][slot]));
+      this.equip.guardiao[slot] = Math.min(5, top + 1);
+    }
+
+    for (const c of this.companions) {
+      this.killVisual(c.visual);
+      c.label.destroy();
+    }
+
+    this.companions = [];
+    this.destroyClones();
+    this.fused = true;
+    this.heroKind = 'guardiao';
+
+    this.killVisual(this.heroVisual);
+    this.heroVisual = this.buildActiveVisual(this.hero.x, this.hero.y);
+    this.heroLegs = this.heroVisual.getData('legs') as Phaser.GameObjects.Rectangle[];
+
+    this.applyHeroStats();
+    this.heroHp = this.heroMaxHp;
+    this.mana = this.maxMana;
+    this.heroLabel.setText(`${this.heroTitle()} · Nv. ${this.heroLevel}`);
+    this.restyleAllies();
+
+    this.cameras.main.flash(400, 255, 240, 170);
+    this.cameras.main.shake(300, 0.008);
+
+    for (let i = 0; i < 3; i++) {
+      const ring = this.add.circle(this.hero.x, this.hero.y, 16, 0xfff0a0, 0.25)
+        .setStrokeStyle(4, [0xe2574c, 0x7dff9a, 0xb08cff][i], 0.95)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(14);
+
+      this.tweens.add({
+        targets: ring,
+        scale: 7 + i * 1.5,
+        alpha: 0,
+        duration: 700,
+        delay: i * 120,
+        onComplete: () => ring.destroy(),
+      });
+    }
+
+    this.closeModal();
+    this.showMessage(
+      this.finalChoice === 'tech'
+        ? 'Os três heróis ascenderam: nasce o DEUS SUPREMO!'
+        : 'Os três heróis se fundiram! Habilidades somadas e melhoradas.',
+    );
     this.refreshInterface();
   }
 
@@ -6227,8 +7128,8 @@ class GameScene extends BaseScene {
     const body =
       `Para avançar além da onda ${level === 2 ? 29 : 59} é preciso desbloquear este mundo.\n\n` +
       `Custo: ${info.cost} moedas  (você tem ${this.coins})\n` +
-      `Recompensa: novo herói disponível — ${heroName}.\n` +
-      'Você poderá alternar entre os heróis desbloqueados, mantendo nível e habilidades.';
+      `Recompensa: ${heroName} entra na batalha ao seu lado (heróis em campo ao mesmo tempo).\n` +
+      'Toque no companheiro (ou use TROCAR) para assumir o comando; nível e habilidades se mantêm.';
 
     this.openModal(info.name, body, [
       {
@@ -6254,19 +7155,43 @@ class GameScene extends BaseScene {
     this.worldLevel = level;
 
     const nextHero = HERO_ORDER.find(h => !this.unlockedHeroes.includes(h));
-    if (nextHero) this.unlockedHeroes.push(nextHero);
+    if (nextHero) {
+      this.unlockedHeroes.push(nextHero);
+      this.spawnCompanion(nextHero);
+    }
 
-    this.applyWorldTheme();
-    this.redrawWorld();
     this.closeModal();
+    this.restyleAllies();
 
-    this.showMessage(
-      `${info.name} desbloqueado!` +
-      (nextHero ? ` ${HERO_STATS[nextHero].name} agora está disponível no menu do herói.` : '') +
-      ' Inicie a onda novamente.',
+    const greece = level === 2;
+
+    this.playTransition(
+      greece ? 'greece' : 'tech',
+      greece
+        ? [
+          'As muralhas ganham mármore e glória.',
+          'Soldados de bronze marcham sob o olhar dos deuses.',
+          'Zeus observa. Que a sua defesa seja lendária!',
+        ]
+        : [
+          'Máquinas despertam e o aço substitui a pedra.',
+          'Robôs e drones invadem o campo de batalha.',
+          'A tecnologia será a sua arma... ou a sua ruína.',
+        ],
+      () => {
+        this.applyWorldTheme();
+        this.redrawWorld();
+      },
+      () => {
+        this.showMessage(
+          `${info.name} desbloqueado!` +
+          (nextHero ? ` ${HERO_STATS[nextHero].name} agora luta ao seu lado.` : '') +
+          ' Inicie a onda novamente.',
+        );
+
+        this.refreshInterface();
+      },
     );
-
-    this.refreshInterface();
   }
 
   private openFinalChoice() {
@@ -6296,29 +7221,58 @@ class GameScene extends BaseScene {
   }
 
   private chooseFinal(choice: 'tech' | 'real') {
-    this.finalChoice = choice;
-    this.applyWorldTheme();
-    this.redrawWorld();
     this.closeModal();
+
+    if (choice === 'tech') this.enterSupreme();
+
+    this.finalChoice = choice;
 
     if (choice === 'real') {
       // O Mundo Real traz mais ajuda: aliados extras de todos os tipos.
       this.spawnAllies('dog');
       this.spawnAllies('human');
       this.spawnAllies('drone');
+    } else {
+      this.applyHeroStats();
+      this.mana = this.maxMana;
     }
 
-    this.showMessage('Mundo escolhido. Inicie a onda 91.');
+    this.playTransition(
+      choice === 'tech' ? 'sky' : 'real',
+      choice === 'tech'
+        ? [
+          'O poder supremo desperta e você ascende aos céus.',
+          'As torres desaparecem. Os aliados se recolhem.',
+          'Só restam os heróis, e nada pode detê-los.',
+        ]
+        : [
+          'Sem fantasia: apenas o mundo como ele é.',
+          'Aliados de todos os mundos lutam ao seu lado.',
+          'Os monstros são fortes. A coragem é a sua arma.',
+        ],
+      () => {
+        this.applyWorldTheme();
+        this.redrawWorld();
+      },
+      () => {
+        this.showMessage('Mundo escolhido. Inicie a onda 91.');
+
+        if (this.canFuse()) this.openFusionOffer();
+      },
+    );
   }
 
   // ---------- poderes dos heróis e das torres ----------
 
   private heroSkills(): SkillKind[] {
-    return [HERO_STATS[this.heroKind].skill, 'repair', 'strike', 'aura'];
+    if (this.fused) return ['explosion', 'clones', 'lightning', 'strike'];
+
+    // O Golpe Heroico (ultimate) é sempre o último.
+    return [HERO_STATS[this.heroKind].skill, 'repair', 'aura', 'strike'];
   }
 
   private heroBlockRadius(): number {
-    return HERO_STATS[this.heroKind].blockRadius
+    return (this.fused ? 36 : HERO_STATS[this.heroKind].blockRadius)
       + this.equip[this.heroKind].armor * 3;
   }
 
@@ -6460,7 +7414,9 @@ class GameScene extends BaseScene {
   private useLightning(cost: number, rank: number) {
     const range = 190 + rank * 10;
     const count = 3 + rank;
-    const damage = 4 + Math.floor(this.heroLevel * 0.9) + rank * 2;
+    const damage = Math.round(
+      (4 + Math.floor(this.heroLevel * 0.9) + rank * 2) * this.powerMult(),
+    );
 
     const targets = this.enemies
       .filter(e => e.alive && Phaser.Math.Distance.Between(
@@ -6615,9 +7571,7 @@ class GameScene extends BaseScene {
     const flip = this.heroVisual.scaleX < 0 ? -1 : 1;
 
     this.killVisual(this.heroVisual);
-    this.heroVisual = this.createHeroVisual(
-      this.heroKind, this.hero.x, this.hero.y, this.equip[this.heroKind],
-    ).setDepth(7);
+    this.heroVisual = this.buildActiveVisual(this.hero.x, this.hero.y);
     this.heroVisual.setScale(flip, 1);
     this.heroVisual.setVisible(!this.heroDead);
     this.heroLegs = this.heroVisual.getData('legs') as Phaser.GameObjects.Rectangle[];
@@ -6696,7 +7650,7 @@ class GameScene extends BaseScene {
     this.drawPanelFrame(panel, 20, 60, 560, 880, 10);
 
     keep(
-      this.add.text(300, 88, `${st.name}  ·  NÍVEL ${this.heroLevel}`, {
+      this.add.text(300, 88, `${this.heroTitle()}  ·  NÍVEL ${this.heroLevel}`, {
         fontFamily: 'Georgia, serif',
         fontSize: '22px',
         color: '#f0d58a',
@@ -6713,7 +7667,10 @@ class GameScene extends BaseScene {
     panel.strokeEllipse(115, 262, 130, 28);
 
     keep(
-      this.createHeroVisual(kind, 115, 215, eq).setScale(3).setDepth(52),
+      (this.fused
+        ? this.buildActiveVisual(115, 215)
+        : this.createHeroVisual(kind, 115, 215, eq)
+      ).setScale(3).setDepth(52),
     );
 
     // atributos
@@ -6736,8 +7693,10 @@ class GameScene extends BaseScene {
     label(
       40, 280,
       aura
-        ? `${st.auraName} Nv.${aura.rank}: +${Math.round(aura.dmg * 100 - 100)}% dano e +${Math.round(aura.spd * 100 - 100)}% velocidade nas torres ${TOWER_STATS[st.specialty].name} (só as dele).`
-        : 'Aura passiva bloqueada: melhore AURA em Habilidades (clique no herói).',
+        ? (this.fused
+          ? `Aura Fundida Nv.${aura.rank}: +${Math.round(aura.dmg * 100 - 100)}% dano e +${Math.round(aura.spd * 100 - 100)}% velocidade em TODAS as torres.`
+          : `${st.auraName} Nv.${aura.rank}: +${Math.round(aura.dmg * 100 - 100)}% dano e +${Math.round(aura.spd * 100 - 100)}% velocidade só nas torres ${TOWER_STATS[st.specialty].name}.`)
+        : '',
       11, '#e6dfcd',
     ).setWordWrapWidth(520);
 
@@ -6814,33 +7773,43 @@ class GameScene extends BaseScene {
     keep(close);
 
     // troca de herói
-    const others = this.unlockedHeroes.filter(h => h !== kind);
-
-    if (others.length) {
-      others.forEach((h, i) => {
+    if (this.companions.length) {
+      this.companions.forEach((c, i) => {
         const b = this.makeButton(
-          40 + i * 265, 772, `TROCAR: ${HERO_STATS[h].name}`, '#355a52',
+          40 + i * 265, 764, `TROCAR: ${HERO_STATS[c.kind].name}`, '#355a52',
           () => {
             this.closeModal();
-            this.swapHero(h);
+            this.swapHero(c.kind);
           },
-          12, 255, 38,
+          12, 255, 36,
         );
 
         b.setDepth(53);
         keep(b);
       });
+    } else if (this.fused) {
+      label(40, 776, 'Os três heróis estão fundidos em um só.', 11, '#f0d58a');
     } else {
-      label(40, 782, 'Outros heróis são liberados nas ondas 30 e 60.', 11, '#b39a62');
+      label(40, 776, 'Mundo 2 libera o 2º herói em campo; Mundo 3 libera o 3º.', 11, '#b39a62');
+    }
+
+    if (this.canFuse()) {
+      const fb = this.makeButton(
+        40, 804, this.finalChoice === 'tech' ? 'ASCENDER A DEUS SUPREMO' : 'FUNDIR OS 3 HERÓIS', '#8a5a1a',
+        () => this.openFusionOffer(), 12, 520, 30,
+      );
+
+      fb.setDepth(53);
+      keep(fb);
     }
 
     label(
-      40, 830,
+      40, 840,
       `Vida: ${Math.ceil(this.heroHp)}/${this.heroMaxHp}   ·   Pontos: ${this.skillPoints}   ·   XP ${this.xp} / ${this.heroLevel * 50}`,
       12, '#d9d0b7',
     );
 
-    this.panelNote = label(40, 860, '', 12, '#ff9a8a');
+    this.panelNote = label(40, 862, '', 12, '#ff9a8a');
 
     if (this.heroDead) {
       const rv = this.makeButton(
@@ -6950,6 +7919,572 @@ class GameScene extends BaseScene {
     keep(back);
   }
 
+  // ---------- transições de mundo (≈10 s) ----------
+
+  private playTransition(
+    kind: 'greece' | 'tech' | 'real' | 'sky',
+    lines: string[],
+    onMid: () => void,
+    onEnd: () => void,
+  ) {
+    this.transToken++;
+    const token = this.transToken;
+
+    this.cancelBuild();
+    this.closeContextMenu();
+    this.modalOpen = true;
+
+    const D = 90;
+    const objs: Phaser.GameObjects.GameObject[] = [];
+    const keep = <T extends Phaser.GameObjects.GameObject>(o: T): T => {
+      objs.push(o);
+      return o;
+    };
+    const alive = () => token === this.transToken && !this.gameOver;
+
+    const cfg = {
+      greece: {
+        top: 0x1a1230, bot: 0xe0a850, accent: '#ffe08a', accentN: 0xffe08a,
+        title: 'GRÉCIA ANTIGA', sub: 'O Olimpo observa os mortais',
+      },
+      tech: {
+        top: 0x020a1a, bot: 0x0a4a6a, accent: '#6fe3ff', accentN: 0x3ccfff,
+        title: 'ERA TECNOLÓGICA', sub: 'O futuro chegou',
+      },
+      real: {
+        top: 0x10131c, bot: 0x8a8f98, accent: '#ffffff', accentN: 0xffffff,
+        title: 'MUNDO REAL', sub: 'Sem magia. Sem fantasia.',
+      },
+      sky: {
+        top: 0x0b2a6a, bot: 0xffe9a8, accent: '#fff3b0', accentN: 0xfff0a0,
+        title: 'OS CÉUS', sub: 'Além do alcance dos mortais',
+      },
+    }[kind];
+
+    const bg = keep(this.add.graphics().setDepth(D).setAlpha(0));
+    this.fillVGradient(bg, 0, 0, WIDTH, HEIGHT, cfg.top, cfg.bot, 1, 20);
+
+    this.tweens.add({ targets: bg, alpha: 1, duration: 800 });
+
+    const blocker = keep(
+      this.add.rectangle(300, 500, WIDTH, HEIGHT, 0x000000, 0.01)
+        .setDepth(D + 20)
+        .setInteractive(),
+    );
+
+    // ----- motivos de cada mundo -----
+    const L = (c: number) => this.lerpColor(c, 0xffffff, 0.0);
+
+    if (kind === 'greece') {
+      for (let i = 0; i < 6; i++) {
+        const ray = keep(
+          this.add.rectangle(300, 260, 16, 1100, 0xfff0b0, 0.1)
+            .setBlendMode(Phaser.BlendModes.ADD)
+            .setDepth(D + 1)
+            .setAngle(i * 30),
+        );
+
+        this.tweens.add({ targets: ray, angle: ray.angle + 50, duration: 10000 });
+      }
+
+      for (let i = 0; i < 7; i++) {
+        const col = keep(this.add.container(36 + i * 88, 1120).setDepth(D + 2));
+        col.add([
+          this.add.rectangle(0, -210, 34, 420, 0xf2e6c8).setStrokeStyle(2, 0x8a6a22),
+          this.add.rectangle(0, -424, 50, 12, 0xe6d6a6).setStrokeStyle(2, 0x8a6a22),
+          this.add.rectangle(0, 0, 54, 12, 0xe6d6a6).setStrokeStyle(2, 0x8a6a22),
+        ]);
+
+        this.tweens.add({
+          targets: col,
+          y: 930,
+          delay: 500 + i * 220,
+          duration: 1500,
+          ease: 'Back.easeOut',
+        });
+      }
+
+      this.time.addEvent({
+        delay: 110,
+        repeat: 70,
+        callback: () => {
+          if (!alive()) return;
+
+          const leaf = this.add.ellipse(
+            Phaser.Math.Between(0, WIDTH), -10, 10, 5, 0x7ac36a,
+          ).setDepth(D + 3).setRotation(Math.random() * 3);
+
+          objs.push(leaf);
+
+          this.tweens.add({
+            targets: leaf,
+            y: 1020,
+            x: leaf.x + Phaser.Math.Between(-90, 90),
+            rotation: leaf.rotation + 6,
+            duration: Phaser.Math.Between(2200, 3400),
+            onComplete: () => leaf.destroy(),
+          });
+        },
+      });
+    } else if (kind === 'tech') {
+      const grid = keep(this.add.container(0, 0).setDepth(D + 1));
+      const gg = this.add.graphics();
+
+      gg.lineStyle(1, cfg.accentN, 0.22);
+
+      for (let x = 0; x <= WIDTH; x += 50) gg.lineBetween(x, 0, x, HEIGHT + 50);
+      for (let y = -50; y <= HEIGHT + 50; y += 50) gg.lineBetween(0, y, WIDTH, y);
+
+      grid.add(gg);
+
+      this.tweens.add({ targets: grid, y: 50, duration: 900, repeat: -1 });
+
+      const scan = keep(
+        this.add.rectangle(300, 0, WIDTH, 8, cfg.accentN, 0.45)
+          .setBlendMode(Phaser.BlendModes.ADD)
+          .setDepth(D + 3),
+      );
+
+      this.tweens.add({
+        targets: scan, y: 1000, duration: 2400, yoyo: true, repeat: -1,
+      });
+
+      this.time.addEvent({
+        delay: 60,
+        repeat: 150,
+        callback: () => {
+          if (!alive()) return;
+
+          const ch = this.add.text(
+            Phaser.Math.Between(0, WIDTH), -14,
+            ['0', '1', '0', '1', 'λ', 'Ω', '#'][Phaser.Math.Between(0, 6)],
+            { fontFamily: 'monospace', fontSize: '15px', color: cfg.accent },
+          ).setDepth(D + 2).setAlpha(0.8);
+
+          objs.push(ch);
+
+          this.tweens.add({
+            targets: ch,
+            y: 1020,
+            duration: Phaser.Math.Between(1800, 2800),
+            onComplete: () => ch.destroy(),
+          });
+        },
+      });
+    } else if (kind === 'sky') {
+      for (let i = 0; i < 8; i++) {
+        const ray = keep(
+          this.add.rectangle(300, 1000, 18, 1300, 0xfff6c0, 0.12)
+            .setBlendMode(Phaser.BlendModes.ADD)
+            .setOrigin(0.5, 1)
+            .setDepth(D + 1)
+            .setAngle(-70 + i * 20),
+        );
+
+        this.tweens.add({ targets: ray, alpha: 0.28, duration: 900, yoyo: true, repeat: -1, delay: i * 120 });
+      }
+
+      const halo = keep(
+        this.add.circle(300, 430, 90, 0xffffff, 0.2)
+          .setStrokeStyle(3, 0xfff0a0, 0.8)
+          .setBlendMode(Phaser.BlendModes.ADD)
+          .setDepth(D + 1),
+      );
+
+      this.tweens.add({ targets: halo, scale: 2.4, alpha: 0, duration: 1600, repeat: -1 });
+
+      // nuvens despencando = sensação de subir aos céus
+      this.time.addEvent({
+        delay: 80,
+        repeat: 110,
+        callback: () => {
+          if (!alive()) return;
+
+          const w = Phaser.Math.Between(110, 240);
+          const cloud = this.add.ellipse(
+            Phaser.Math.Between(0, WIDTH), -80, w, w * 0.32, 0xffffff,
+            Phaser.Math.FloatBetween(0.35, 0.7),
+          ).setDepth(D + 2);
+
+          objs.push(cloud);
+
+          this.tweens.add({
+            targets: cloud,
+            y: 1080,
+            duration: Phaser.Math.Between(1400, 2400),
+            onComplete: () => cloud.destroy(),
+          });
+        },
+      });
+
+      this.time.addEvent({
+        delay: 90,
+        repeat: 100,
+        callback: () => {
+          if (!alive()) return;
+
+          const spark = this.add.circle(
+            Phaser.Math.Between(0, WIDTH), 1020, Phaser.Math.Between(2, 4), 0xfff0a0, 0.9,
+          ).setBlendMode(Phaser.BlendModes.ADD).setDepth(D + 3);
+
+          objs.push(spark);
+
+          this.tweens.add({
+            targets: spark,
+            y: -20,
+            duration: Phaser.Math.Between(1600, 2800),
+            onComplete: () => spark.destroy(),
+          });
+        },
+      });
+    } else {
+      const glow = keep(
+        this.add.circle(300, 1250, 230, 0xfff0c0, 0.25)
+          .setBlendMode(Phaser.BlendModes.ADD)
+          .setDepth(D + 1),
+      );
+      const sun = keep(this.add.circle(300, 1250, 120, 0xffe9b0, 0.95).setDepth(D + 1));
+
+      this.tweens.add({ targets: [glow, sun], y: 640, duration: 5500, ease: 'Sine.easeOut' });
+
+      for (let i = 0; i < 3; i++) {
+        const cloud = keep(
+          this.add.ellipse(-100 + i * 260, 200 + i * 120, 190, 46, 0xffffff, 0.25)
+            .setDepth(D + 2),
+        );
+
+        this.tweens.add({
+          targets: cloud, x: cloud.x + 800, duration: 9000, ease: 'Linear',
+        });
+      }
+
+      for (let i = 0; i < 16; i++) {
+        const h = 140 + ((i * 97) % 280);
+        const b = keep(
+          this.add.rectangle(20 + i * 38, 1300, 36, h, 0x0b0e15)
+            .setOrigin(0.5, 1)
+            .setStrokeStyle(1, 0x2a3040)
+            .setDepth(D + 3),
+        );
+
+        this.tweens.add({
+          targets: b, y: 1000, delay: 700 + i * 90, duration: 1300, ease: 'Cubic.easeOut',
+        });
+      }
+    }
+
+    // ----- título e história -----
+    const title = keep(
+      this.add.text(300, 330, cfg.title, {
+        fontFamily: 'Georgia, serif',
+        fontSize: '42px',
+        color: cfg.accent,
+        fontStyle: 'bold',
+        stroke: '#000000',
+        strokeThickness: 7,
+      }).setOrigin(0.5).setDepth(D + 10).setAlpha(0).setScale(1.6),
+    );
+
+    const sub = keep(
+      this.add.text(300, 392, cfg.sub, {
+        fontFamily: 'Georgia, serif',
+        fontSize: '17px',
+        fontStyle: 'italic',
+        color: '#ffffff',
+        stroke: '#000000',
+        strokeThickness: 4,
+      }).setOrigin(0.5).setDepth(D + 10).setAlpha(0),
+    );
+
+    this.time.delayedCall(1500, () => {
+      if (!alive()) return;
+
+      this.cameras.main.flash(350, 255, 255, 255);
+      this.tweens.add({
+        targets: title, alpha: 1, scale: 1, duration: 700, ease: 'Back.easeOut',
+      });
+
+      for (let i = 0; i < 3; i++) {
+        const ring = this.add.circle(300, 330, 20, cfg.accentN, 0.1)
+          .setStrokeStyle(4, cfg.accentN, 0.9)
+          .setBlendMode(Phaser.BlendModes.ADD)
+          .setDepth(D + 9);
+
+        objs.push(ring);
+
+        this.tweens.add({
+          targets: ring, scale: 18 + i * 3, alpha: 0, duration: 1400, delay: i * 200,
+          onComplete: () => ring.destroy(),
+        });
+      }
+    });
+
+    this.time.delayedCall(2400, () => {
+      if (alive()) this.tweens.add({ targets: sub, alpha: 1, duration: 800 });
+    });
+
+    lines.forEach((text, i) => {
+      const t = keep(
+        this.add.text(300, 560 + i * 56, text, {
+          fontFamily: 'Georgia, serif',
+          fontSize: '17px',
+          color: '#fff6dc',
+          align: 'center',
+          wordWrap: { width: 500 },
+          stroke: '#000000',
+          strokeThickness: 4,
+        }).setOrigin(0.5).setDepth(D + 10).setAlpha(0),
+      );
+
+      this.time.delayedCall(4200 + i * 1700, () => {
+        if (alive()) this.tweens.add({ targets: t, alpha: 1, y: t.y - 8, duration: 700 });
+      });
+    });
+
+    const skipHint = keep(
+      this.add.text(300, 960, 'toque para pular', {
+        fontFamily: 'Arial, sans-serif', fontSize: '11px', color: '#d8d8d8',
+      }).setOrigin(0.5).setDepth(D + 11).setAlpha(0),
+    );
+
+    // ----- controle da linha do tempo -----
+    let midDone = false;
+    let done = false;
+
+    const mid = () => {
+      if (midDone) return;
+      midDone = true;
+      onMid();
+    };
+
+    const finish = () => {
+      if (done) return;
+      done = true;
+      mid();
+
+      this.tweens.add({
+        targets: objs.filter(o => o.active),
+        alpha: 0,
+        duration: 600,
+        onComplete: () => {
+          for (const o of objs) {
+            if (o.active) this.killVisual(o);
+          }
+
+          this.modalOpen = false;
+          onEnd();
+        },
+      });
+    };
+
+    this.time.delayedCall(4000, () => {
+      if (!alive()) return;
+      this.cameras.main.flash(500, 255, 255, 255);
+      mid();
+    });
+
+    this.time.delayedCall(3000, () => {
+      if (!alive() || done) return;
+      this.tweens.add({ targets: skipHint, alpha: 0.8, duration: 500 });
+      blocker.on('pointerdown', finish);
+    });
+
+    this.time.delayedCall(9400, () => {
+      if (alive()) finish();
+    });
+
+    void L;
+  }
+
+  // ---------- Mundo Tecnológico: poder supremo ----------
+
+  private enterSupreme() {
+    this.techSnap = {
+      coins: this.coins,
+      xp: this.xp,
+      heroLevel: this.heroLevel,
+      skillPoints: this.skillPoints,
+      skills: { ...this.skillLevels },
+      equip: {
+        guardiao: { ...this.equip.guardiao },
+        patrulheiro: { ...this.equip.patrulheiro },
+        arcanista: { ...this.equip.arcanista },
+      },
+      wave: this.wave,
+      baseHP: this.baseHP,
+      maxBaseHP: this.maxBaseHP,
+      heroDeaths: this.heroDeaths,
+      extraMana: this.extraMana,
+      stock: { ...this.stock },
+      heroKind: this.heroKind,
+      companionKinds: this.companions.map(c => c.kind),
+    };
+
+    // As torres e os aliados somem (guardados para o caso de voltar).
+    this.stashTowers = this.towers;
+    this.towers = [];
+
+    for (const t of this.stashTowers) t.visual.setVisible(false);
+
+    this.stashAllies = this.allies;
+    this.allies = [];
+
+    for (const a of this.stashAllies) a.visual.setVisible(false);
+
+    this.selectedTower = null;
+    this.rangeGraphics.clear();
+    this.destroyClones();
+    this.cloneUntil = 0;
+  }
+
+  private supremeTick() {
+    if (this.finalChoice !== 'tech') return;
+
+    this.coins = Math.max(this.coins, SUPREME_COINS);
+    this.mana = this.maxMana;
+
+    if (!this.heroDead) this.heroHp = this.heroMaxHp;
+  }
+
+  // Ataque comum: no modo supremo cada tiro varre um grupo inteiro.
+  private hitTarget(target: Enemy, dmg: number, fx: number, fy: number) {
+    if (this.finalChoice !== 'tech') {
+      this.damageEnemy(target, dmg);
+      return;
+    }
+
+    const tx = target.body.x;
+    const ty = target.body.y;
+
+    this.drawBolt(fx, fy - 8, tx, ty - 6);
+
+    for (const e of [...this.enemies]) {
+      if (!e.alive) continue;
+
+      if (Phaser.Math.Distance.Between(e.body.x, e.body.y, tx, ty) <= (this.fused ? 230 : 130)) {
+        this.damageEnemy(e, dmg);
+      }
+    }
+  }
+
+  private returnToReal() {
+    const snap = this.techSnap;
+
+    if (!snap) return;
+
+    this.closeModal();
+    this.techSnap = null;
+
+    // Histórico do nível 90 de volta, exatamente como estava.
+    this.coins = snap.coins;
+    this.xp = snap.xp;
+    this.heroLevel = snap.heroLevel;
+    this.skillPoints = snap.skillPoints;
+    this.skillLevels = { ...snap.skills };
+    this.equip = {
+      guardiao: { ...snap.equip.guardiao },
+      patrulheiro: { ...snap.equip.patrulheiro },
+      arcanista: { ...snap.equip.arcanista },
+    };
+    this.wave = snap.wave;
+    this.baseHP = snap.baseHP;
+    this.maxBaseHP = snap.maxBaseHP;
+    this.heroDeaths = snap.heroDeaths;
+    this.extraMana = snap.extraMana;
+    this.stock = { ...snap.stock };
+
+    for (const e of [...this.enemies]) {
+      this.killVisual(e.visual);
+      e.body.destroy();
+    }
+
+    this.enemies = [];
+    this.activeWaves = new Map();
+    this.zones = [];
+    this.destroyClones();
+    this.cloneUntil = 0;
+
+    this.towers = this.stashTowers;
+    this.stashTowers = [];
+
+    for (const t of this.towers) t.visual.setVisible(true);
+
+    this.allies = this.stashAllies;
+    this.stashAllies = [];
+
+    for (const a of this.allies) a.visual.setVisible(true);
+
+    this.finalChoice = 'real';
+    this.heroDead = false;
+
+    // O deus supremo volta a ser os três heróis.
+    if (this.fused) {
+      this.fused = false;
+      this.heroKind = snap.heroKind;
+
+      for (const c of this.companions) {
+        this.killVisual(c.visual);
+        c.label.destroy();
+      }
+
+      this.companions = [];
+
+      for (const k of snap.companionKinds) this.spawnCompanion(k);
+    }
+
+    this.applyHeroStats();
+    this.heroHp = this.heroMaxHp;
+    this.mana = this.maxMana;
+    this.refreshHeroLook();
+
+    for (const c of this.companions) {
+      this.killVisual(c.visual);
+      c.visual = this.makeCompanionVisual(c.kind, c.x, c.y);
+      c.legs = c.visual.getData('legs') as Phaser.GameObjects.Rectangle[];
+    }
+
+    this.heroLabel.setText(`${this.heroTitle()} · Nv. ${this.heroLevel}`);
+
+    // Ajuda extra do Mundo Real.
+    this.spawnAllies('dog');
+    this.spawnAllies('human');
+    this.spawnAllies('drone');
+    this.restyleAllies();
+
+    this.playTransition(
+      'real',
+      [
+        'O tempo retrocede... de volta à onda 90.',
+        'Tudo volta exatamente como estava antes da sua escolha.',
+        'Agora, o Mundo Real.',
+      ],
+      () => {
+        this.applyWorldTheme();
+        this.redrawWorld();
+      },
+      () => {
+        this.showMessage('Mundo Real! Você voltou à onda 90. Inicie a onda 91.');
+        this.refreshInterface();
+        if (this.canFuse()) this.openFusionOffer();
+      },
+    );
+  }
+
+  private restyleAllies() {
+    for (const a of this.allies) {
+      const flip = a.visual.scaleX < 0 ? -1 : 1;
+
+      this.killVisual(a.visual);
+
+      a.visual = this.createAllyVisual(a.kind)
+        .setDepth(a.kind === 'drone' ? 9 : 6)
+        .setPosition(a.x, a.y)
+        .setScale(flip, 1);
+
+      a.legs = (a.visual.getData('legs') as Phaser.GameObjects.Rectangle[]) || [];
+    }
+  }
+
   // ---------- aliados ----------
 
   private onHeroLevel(level: number) {
@@ -6966,6 +8501,8 @@ class GameScene extends BaseScene {
   }
 
   private spawnAllies(kind: AllyKind) {
+    if (this.finalChoice === 'tech') return;
+
     for (let i = 0; i < 2; i++) {
       const visual = this.createAllyVisual(kind)
         .setDepth(kind === 'drone' ? 9 : 6);
@@ -6987,60 +8524,174 @@ class GameScene extends BaseScene {
     }
   }
 
+  // Os pets assumem o visual do herói que está no comando.
   private createAllyVisual(kind: AllyKind): Phaser.GameObjects.Container {
+    const owner: HeroKind | 'fused' = this.fused ? 'fused' : this.heroKind;
+    const pal = {
+      guardiao: { main: 0x4d6b9a, dark: 0x2b3f5e, accent: 0xe0c040, glow: 0x7ab8ff },
+      patrulheiro: { main: 0x3d7a4a, dark: 0x23472b, accent: 0xb8ff9a, glow: 0x7dff9a },
+      arcanista: { main: 0x6b4a9f, dark: 0x3b2a66, accent: 0xd09fff, glow: 0xb08cff },
+      fused: { main: 0xe8d9a0, dark: 0x8a6a22, accent: 0xffffff, glow: 0xfff0a0 },
+    }[owner];
+
     const c = this.add.container(0, 0);
     const legs: Phaser.GameObjects.Rectangle[] = [];
 
     if (kind === 'dog') {
+      const fur = owner === 'arcanista' ? 0x7a5aa8
+        : owner === 'patrulheiro' ? 0x6f8a52
+          : owner === 'fused' ? 0xf0dca0 : 0x9a7448;
+      const furDark = this.lerpColor(fur, 0x000000, 0.35);
+
       const shadow = this.add.ellipse(0, 8, 26, 8, 0x0a0f0b, 0.5);
-      const tail = this.add.rectangle(-13, -3, 8, 3, 0x8a6a44).setRotation(-0.6);
-      const body = this.add.ellipse(0, 0, 24, 12, 0x9a7448).setStrokeStyle(1, 0x3a2a18);
-      const head = this.add.circle(12, -4, 6, 0xa88050).setStrokeStyle(1, 0x3a2a18);
-      const ear = this.add.triangle(13, -10, -3, 4, 3, 4, 0, -4, 0x5a3e22);
-      const snout = this.add.rectangle(17, -3, 5, 4, 0x6b4b2a);
-      const eye = this.add.circle(14, -5, 1.2, 0x000000);
+      const tail = this.add.rectangle(-13, -3, 8, 3, furDark).setRotation(-0.6);
+      const body = this.add.ellipse(0, 0, 24, 12, fur).setStrokeStyle(1, 0x2a2018);
+      const head = this.add.circle(12, -4, 6, this.lerpColor(fur, 0xffffff, 0.12))
+        .setStrokeStyle(1, 0x2a2018);
+      const ear = this.add.triangle(13, -10, -3, 4, 3, 4, 0, -4, furDark);
+      const snout = this.add.rectangle(17, -3, 5, 4, furDark);
+      const eye = this.add.circle(14, -5, 1.3, owner === 'arcanista' || owner === 'fused' ? pal.accent : 0x000000);
 
       for (const lx of [-8, -3, 4, 9]) {
-        const leg = this.add.rectangle(lx, 6, 3, 6, 0x6b4b2a);
+        const leg = this.add.rectangle(lx, 6, 3, 6, furDark);
         leg.setData('by', 6);
         legs.push(leg);
       }
 
       c.add([shadow, tail, ...legs, body, head, ear, snout, eye]);
+
+      if (owner === 'guardiao' || owner === 'fused') {
+        c.add([
+          this.add.rectangle(-1, -2, 16, 9, pal.main).setStrokeStyle(1, pal.accent),
+          this.add.rectangle(7, -7, 4, 4, pal.accent),
+          this.add.rectangle(11, -9, 7, 3, pal.dark).setStrokeStyle(1, pal.accent),
+        ]);
+      }
+
+      if (owner === 'patrulheiro' || owner === 'fused') {
+        c.add([
+          this.add.triangle(8, 0, -3, -3, 3, -3, 0, 5, pal.accent),
+          this.add.rectangle(-4, -8, 3, 10, 0x5a3e22).setRotation(0.4),
+          this.add.rectangle(-4, -14, 3, 3, pal.accent),
+        ]);
+      }
+
+      if (owner === 'arcanista' || owner === 'fused') {
+        const rune = this.add.circle(-2, -3, 4, pal.glow, 0.7)
+          .setBlendMode(Phaser.BlendModes.ADD);
+        const halo = this.add.circle(0, 0, 17, pal.glow, 0.16)
+          .setBlendMode(Phaser.BlendModes.ADD);
+
+        c.addAt(halo, 0);
+        c.add(rune);
+        this.tweens.add({ targets: rune, alpha: 0.2, duration: 500, yoyo: true, repeat: -1 });
+      }
     } else if (kind === 'human') {
       const shadow = this.add.ellipse(0, 12, 22, 8, 0x0a0f0b, 0.5);
-      const leftLeg = this.add.rectangle(-4, 9, 5, 9, 0x30363c);
-      const rightLeg = this.add.rectangle(4, 9, 5, 9, 0x30363c);
+      const leftLeg = this.add.rectangle(-4, 9, 5, 9, pal.dark);
+      const rightLeg = this.add.rectangle(4, 9, 5, 9, pal.dark);
       leftLeg.setData('by', 9);
       rightLeg.setData('by', 9);
       legs.push(leftLeg, rightLeg);
 
-      const body = this.add.rectangle(0, -2, 14, 15, 0x6b7f8f).setStrokeStyle(1, GOLD);
-      const head = this.add.circle(0, -13, 6, 0xc3a47e).setStrokeStyle(1, 0x4a3b2d);
-      const helmet = this.add.rectangle(0, -17, 12, 4, 0x9aa6aa);
-      const sword = this.add.rectangle(11, -3, 3, 16, 0xdfe6e9).setRotation(-0.3);
-      const shield = this.add.ellipse(-10, -2, 8, 13, 0x4d6b86).setStrokeStyle(1, GOLD);
+      c.add([shadow, leftLeg, rightLeg]);
 
-      c.add([shadow, leftLeg, rightLeg, body, head, helmet, sword, shield]);
+      if (owner === 'guardiao') {
+        c.add([
+          this.add.rectangle(0, -2, 15, 16, pal.main).setStrokeStyle(1, pal.accent),
+          this.add.circle(0, -13, 6, 0xc3a47e).setStrokeStyle(1, 0x4a3b2d),
+          this.add.rectangle(0, -17, 13, 6, 0x9aa6aa).setStrokeStyle(1, 0x333333),
+          this.add.rectangle(0, -23, 3, 6, 0xc83a3a),
+          this.add.rectangle(11, -3, 3, 17, 0xdfe6e9).setRotation(-0.3),
+          this.add.rectangle(-10, -1, 9, 15, pal.dark).setStrokeStyle(2, pal.accent),
+        ]);
+      } else if (owner === 'patrulheiro') {
+        c.add([
+          this.add.rectangle(0, -2, 13, 15, pal.main).setStrokeStyle(1, pal.dark),
+          this.add.circle(0, -13, 6, 0xc3a47e).setStrokeStyle(1, 0x4a3b2d),
+          this.add.triangle(0, -17, -8, 5, 8, 5, 0, -8, pal.dark),
+          this.add.ellipse(-11, -3, 7, 20, 0x000000, 0).setStrokeStyle(2, 0x8a6a3a),
+          this.add.rectangle(-11, -3, 1, 20, 0xdfe6e9),
+          this.add.rectangle(7, -6, 4, 12, 0x5a3e22).setRotation(0.2),
+        ]);
+      } else if (owner === 'arcanista') {
+        const orb = this.add.circle(11, -19, 4, pal.glow, 0.95)
+          .setBlendMode(Phaser.BlendModes.ADD);
+
+        c.add([
+          this.add.triangle(0, 0, -9, 10, 9, 10, 0, -14, pal.main).setStrokeStyle(1, pal.accent),
+          this.add.circle(0, -13, 6, 0xc3a47e).setStrokeStyle(1, 0x4a3b2d),
+          this.add.triangle(0, -22, -8, 8, 8, 8, 0, -12, pal.dark).setStrokeStyle(1, pal.accent),
+          this.add.rectangle(11, -6, 2, 24, 0x6a4a2a),
+          orb,
+        ]);
+        this.tweens.add({ targets: orb, scale: 1.6, alpha: 0.5, duration: 600, yoyo: true, repeat: -1 });
+      } else {
+        const orb = this.add.circle(0, -27, 4, pal.accent, 1)
+          .setBlendMode(Phaser.BlendModes.ADD);
+
+        c.add([
+          this.add.rectangle(0, -2, 16, 16, pal.main).setStrokeStyle(2, pal.dark),
+          this.add.circle(0, -13, 6, 0xc3a47e).setStrokeStyle(1, 0x4a3b2d),
+          this.add.rectangle(0, -18, 14, 4, pal.accent).setStrokeStyle(1, pal.dark),
+          this.add.rectangle(11, -3, 3, 17, 0xffffff).setRotation(-0.3),
+          orb,
+        ]);
+        this.tweens.add({ targets: orb, y: -31, duration: 500, yoyo: true, repeat: -1 });
+      }
     } else {
-      const glow = this.add.circle(0, 0, 16, 0x50e0ff, 0.25)
+      const glow = this.add.circle(0, 0, 17, pal.glow, 0.25)
         .setBlendMode(Phaser.BlendModes.ADD);
-      const body = this.add.ellipse(0, 0, 16, 10, 0x8a949c).setStrokeStyle(2, 0x50e0ff);
-      const eye = this.add.circle(0, 1, 3, 0xff4040);
 
-      const rotor = this.add.container(0, -7, [
+      c.add(glow);
+
+      if (owner === 'guardiao') {
+        c.add([
+          this.add.ellipse(0, 0, 18, 11, 0x8a949c).setStrokeStyle(2, pal.glow),
+          this.add.rectangle(7, 0, 5, 14, pal.accent).setStrokeStyle(1, 0x000000),
+          this.add.circle(0, 1, 3, 0x3a8aff),
+        ]);
+      } else if (owner === 'patrulheiro') {
+        c.add([
+          this.add.ellipse(0, 0, 16, 9, pal.main).setStrokeStyle(2, pal.accent),
+          this.add.rectangle(10, -2, 8, 2, pal.accent),
+          this.add.rectangle(10, 3, 8, 2, pal.accent),
+          this.add.circle(0, 1, 3, 0xff4040),
+          this.add.circle(0, 1, 1, 0xffffff),
+        ]);
+      } else if (owner === 'arcanista') {
+        const gem = this.add.rectangle(0, 0, 13, 13, pal.main, 0.95)
+          .setRotation(Math.PI / 4)
+          .setStrokeStyle(2, pal.accent);
+        const runes = this.add.container(0, 0, [
+          this.add.circle(14, 0, 2.5, pal.accent),
+          this.add.circle(-14, 0, 2.5, pal.accent),
+        ]);
+
+        c.add([gem, runes, this.add.circle(0, 0, 3, 0xffffff, 0.9)]);
+        this.tweens.add({ targets: runes, angle: 360, duration: 1400, repeat: -1 });
+      } else {
+        const orbs = this.add.container(0, 0, [
+          this.add.circle(14, 0, 3, 0xe2574c),
+          this.add.circle(-7, 12, 3, 0x7dff9a),
+          this.add.circle(-7, -12, 3, 0xb08cff),
+        ]);
+
+        c.add([
+          this.add.circle(0, 0, 8, pal.main).setStrokeStyle(2, pal.dark),
+          orbs,
+          this.add.circle(0, 0, 3, 0xffffff),
+        ]);
+        this.tweens.add({ targets: orbs, angle: 360, duration: 1800, repeat: -1 });
+      }
+
+      const rotor = this.add.container(0, -8, [
         this.add.rectangle(0, 0, 22, 2, 0xcfd8dc),
         this.add.rectangle(0, 0, 2, 22, 0xcfd8dc, 0.5),
       ]);
 
-      this.tweens.add({
-        targets: rotor,
-        angle: 360,
-        duration: 220,
-        repeat: -1,
-      });
-
-      c.add([glow, body, eye, rotor]);
+      this.tweens.add({ targets: rotor, angle: 360, duration: 220, repeat: -1 });
+      c.add(rotor);
     }
 
     c.setData('legs', legs);
@@ -7161,6 +8812,7 @@ class GameScene extends BaseScene {
   update(_time: number, delta: number) {
     if (this.gameOver) return;
 
+    this.supremeTick();
     this.moveHero(delta);
     this.regenerateMana(delta);
     this.updateEnemies(delta);
@@ -7170,6 +8822,7 @@ class GameScene extends BaseScene {
     this.updateTowers(delta);
     this.updateAllies(delta);
     this.updateClones(delta);
+    this.updateCompanions(delta);
     this.drawTracers(delta);
     this.updateAura();
     this.updateHeroCombat(delta);
@@ -7227,6 +8880,37 @@ class GameScene extends BaseScene {
   }
 
   private victory() {
+    if (this.finalChoice === 'tech' && this.techSnap) {
+      this.openModal(
+        'VITÓRIA NO MUNDO TECNOLÓGICO',
+        'Você concluiu a onda 100 com poder supremo.\n\n' +
+        'Quer experimentar o MUNDO REAL? Você volta à onda 90 com exatamente o ' +
+        'mesmo histórico de antes da escolha (nível, moedas, torres, aliados e ' +
+        'armamento), sem custo.',
+        [
+          {
+            label: 'EXPERIMENTAR O MUNDO REAL',
+            color: '#6a4a3a',
+            action: () => this.returnToReal(),
+          },
+          {
+            label: 'FINALIZAR',
+            color: '#3a4046',
+            action: () => {
+              this.closeModal();
+              this.showEndPanel(
+                'VITÓRIA',
+                '#f0d58a',
+                'Você defendeu a fortaleza até a onda 100!\nA campanha foi concluída.',
+              );
+            },
+          },
+        ],
+      );
+
+      return;
+    }
+
     this.showEndPanel(
       'VITÓRIA',
       '#f0d58a',
