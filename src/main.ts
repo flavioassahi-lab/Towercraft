@@ -199,6 +199,7 @@ const HERO_LINES: Record<HeroKind, {
   level: string;
   death: string;
   revive: string;
+  idle: string[];
   skill: Record<string, string>;
 }> = {
   guardiao: {
@@ -208,6 +209,7 @@ const HERO_LINES: Record<HeroKind, {
     level: 'Mais forte!',
     death: 'Argh!',
     revive: 'Ainda de pé!',
+    idle: ['Em guarda!', 'A muralha não cai.', 'Venham quando quiserem!'],
     skill: {
       explosion: 'Impacto!', repair: 'Reforçar!', strike: 'Golpe final!',
       clones: 'Irmãos de armas!', lightning: 'Trovão!',
@@ -220,6 +222,7 @@ const HERO_LINES: Record<HeroKind, {
     level: 'Mira afiada!',
     death: 'Ugh!',
     revive: 'De volta ao jogo!',
+    idle: ['Vento a favor.', 'Nada escapa de mim.', 'Uma flecha, um destino.'],
     skill: {
       explosion: 'Fogo!', repair: 'Consertando!', strike: 'Chuva de flechas!',
       clones: 'Sombras!', lightning: 'Raio!',
@@ -232,6 +235,7 @@ const HERO_LINES: Record<HeroKind, {
     level: 'Meu poder cresce!',
     death: 'Ahh!',
     revive: 'A magia me trouxe de volta!',
+    idle: ['A magia vibra…', 'Sinto uma presença.', 'Os astros sussurram.'],
     skill: {
       explosion: 'Explosão arcana!', repair: 'Restaurar!', strike: 'Meteoro!',
       clones: 'Ilusões!', lightning: 'Relâmpago!',
@@ -2159,10 +2163,15 @@ class BaseScene extends Phaser.Scene {
     const head = this.add.circle(0, -19, 9, 0xc3a47e)
       .setStrokeStyle(2, 0x4a3b2d);
 
+    const [hairBack, hairFront] = this.makeHair(kind);
+
     c.add([
-      aura, shadow, cape, legs, leftBoot, rightBoot,
-      torso, chest, belt, shoulderL, shoulderR, head,
+      aura, shadow, cape, hairBack, legs, leftBoot, rightBoot,
+      torso, chest, belt, shoulderL, shoulderR, head, hairFront,
     ]);
+
+    c.setData('browc', kind === 'guardiao' ? 0x3a2412 : kind === 'patrulheiro' ? 0x5a2812 : 0x9a9ab8);
+    c.setData('foff', Math.random() * 3000);
 
     if (kind === 'guardiao') {
       const helmet = this.add.triangle(
@@ -2258,25 +2267,114 @@ class BaseScene extends Phaser.Scene {
     return c;
   }
 
+  private makeHair(kind: HeroKind): [Phaser.GameObjects.Graphics, Phaser.GameObjects.Graphics] {
+    const back = this.add.graphics();
+    const front = this.add.graphics();
+
+    if (kind === 'guardiao') {
+      front.fillStyle(0x5a3a20, 1);
+      front.fillEllipse(0, -25, 19, 9);
+      front.fillRect(-10, -21, 3, 7);
+      front.fillRect(7, -21, 3, 7);
+    } else if (kind === 'patrulheiro') {
+      back.fillStyle(0xb4552a, 1);
+      back.fillEllipse(-11, -13, 6, 11);
+      back.fillEllipse(-12, -8, 4, 7);
+      front.fillStyle(0xb4552a, 1);
+      front.fillEllipse(0, -25.5, 18, 7);
+      front.fillTriangle(-6, -24, 0, -24, -3, -19);
+      front.fillTriangle(0, -24, 6, -24, 3, -19);
+      front.fillRect(-10, -22, 3, 6);
+      front.fillRect(7, -22, 3, 6);
+    } else {
+      back.fillStyle(0xd8d8f0, 1);
+      back.fillEllipse(0, -11, 25, 26);
+      back.fillEllipse(-9, -2, 7, 16);
+      back.fillEllipse(9, -2, 7, 16);
+      front.fillStyle(0xd8d8f0, 1);
+      front.fillEllipse(0, -25, 19, 8);
+      front.fillTriangle(-9, -24, 0, -26, -6, -17);
+      front.fillTriangle(9, -24, 0, -26, 6, -17);
+      front.fillRect(-10.5, -22, 3, 14);
+      front.fillRect(7.5, -22, 3, 14);
+    }
+
+    return [back, front];
+  }
+
   protected setFace(c: Phaser.GameObjects.Container, emo: Emotion) {
+    c.setData('emo', emo);
+    this.drawFace(c);
+  }
+
+  // Piscar, sobrancelhas que se mexem e boca que fala (chamado todo quadro).
+  protected tickFace(c: Phaser.GameObjects.Container, now: number) {
     const g = c.getData('face') as Phaser.GameObjects.Graphics | undefined;
 
     if (!g || !g.active) return;
+
+    const off = (c.getData('foff') as number) || 0;
+    const talking = now < ((c.getData('talk') as number) || 0);
+    const blink = (now + off) % 3400 < 120 ? 1 : 0;
+    const talk = talking ? Math.round((Math.sin(now / 65) + 1) * 2) / 4 : 0;
+    const brow = talking
+      ? Math.round(Math.sin(now / 110) * 2) / 2
+      : Math.round(Math.sin((now + off) / 700) * 2) / 2;
+
+    const key = `${blink}|${talk}|${brow}`;
+
+    if (c.getData('fk') === key) return;
+
+    c.setData('fk', key);
+    c.setData('fopt', { blink, talk, brow });
+    this.drawFace(c);
+  }
+
+  private drawFace(c: Phaser.GameObjects.Container) {
+    const g = c.getData('face') as Phaser.GameObjects.Graphics | undefined;
+
+    if (!g || !g.active) return;
+
+    const emo = (c.getData('emo') as Emotion) || 'neutral';
+    const opt = (c.getData('fopt') as { blink: number; talk: number; brow: number })
+      || { blink: 0, talk: 0, brow: 0 };
+    const browCol = (c.getData('browc') as number) ?? 0x2a1a0e;
 
     g.clear();
 
     const ink = 0x1a1410;
     const ex = 3.4;
     const ey = 1;
+    const by = -3.2 + opt.brow * 0.8;
+
+    const brow = (x1: number, y1: number, x2: number, y2: number) => {
+      g.lineStyle(1.8, browCol, 1);
+      g.lineBetween(x1, y1, x2, y2);
+      g.lineStyle(1.4, ink, 1);
+    };
 
     const eyes = (r: number, pr: number, dy = 0) => {
       for (const sx of [-ex, ex]) {
-        g.fillStyle(0xffffff, 1);
-        g.fillCircle(sx, ey, r);
-        g.fillStyle(ink, 1);
-        g.fillCircle(sx, ey + dy, pr);
+        if (opt.blink) {
+          g.lineStyle(1.4, ink, 1);
+          g.lineBetween(sx - 2.2, ey + 0.5, sx + 2.2, ey + 0.5);
+        } else {
+          g.fillStyle(0xffffff, 1);
+          g.fillCircle(sx, ey, r);
+          g.fillStyle(ink, 1);
+          g.fillCircle(sx, ey + dy, pr);
+        }
       }
     };
+
+    const open = (w: number, h: number) => {
+      g.fillStyle(0x3a0d0d, 1);
+      g.fillEllipse(0, 5.2, w, h);
+      g.fillStyle(0xd85a5a, 1);
+      g.fillEllipse(0, 5.9, w * 0.55, h * 0.4);
+    };
+
+    const talking = opt.talk > 0;
 
     g.lineStyle(1.4, ink, 1);
 
@@ -2287,22 +2385,31 @@ class BaseScene extends Phaser.Scene {
         g.strokePath();
       }
 
-      g.beginPath();
-      g.arc(0, 3.4, 3.4, 0.15, Math.PI - 0.15, false);
-      g.strokePath();
+      brow(-6, by - 0.6, -1.8, by - 1.6);
+      brow(6, by - 0.6, 1.8, by - 1.6);
+
+      if (talking) open(5, 1.5 + opt.talk * 3.5);
+      else {
+        g.beginPath();
+        g.arc(0, 3.4, 3.4, 0.15, Math.PI - 0.15, false);
+        g.strokePath();
+      }
+
       g.fillStyle(0xff8a7a, 0.45);
       g.fillCircle(-6, 4, 1.8);
       g.fillCircle(6, 4, 1.8);
     } else if (emo === 'angry') {
       eyes(2.1, 1.2);
-      g.lineStyle(1.8, ink, 1);
-      g.lineBetween(-6.2, -3, -1.6, -0.6);
-      g.lineBetween(6.2, -3, 1.6, -0.6);
-      g.lineStyle(1.4, ink, 1);
-      g.fillStyle(0x3a0d0d, 1);
-      g.fillRoundedRect(-3, 4.2, 6, 3.2, 1.2);
-      g.fillStyle(0xffffff, 1);
-      g.fillRect(-2.4, 4.2, 4.8, 1.1);
+      brow(-6.2, -3.4 + opt.brow * 0.5, -1.6, -0.8);
+      brow(6.2, -3.4 + opt.brow * 0.5, 1.6, -0.8);
+
+      if (talking) open(5, 1.5 + opt.talk * 3);
+      else {
+        g.fillStyle(0x3a0d0d, 1);
+        g.fillRoundedRect(-3, 4.2, 6, 3.2, 1.2);
+        g.fillStyle(0xffffff, 1);
+        g.fillRect(-2.4, 4.2, 4.8, 1.1);
+      }
     } else if (emo === 'hurt') {
       for (const sx of [-1, 1]) {
         g.beginPath();
@@ -2312,29 +2419,40 @@ class BaseScene extends Phaser.Scene {
         g.strokePath();
       }
 
+      brow(-6, -3.6, -1.8, -2.4);
+      brow(6, -3.6, 1.8, -2.4);
       g.fillStyle(0x3a0d0d, 1);
       g.fillEllipse(0, 5.4, 4.2, 3.6);
     } else if (emo === 'surprised') {
       eyes(3, 1);
-      g.lineStyle(1.4, ink, 1);
-      g.lineBetween(-6, -3.4, -1.8, -3.9);
-      g.lineBetween(6, -3.4, 1.8, -3.9);
-      g.fillStyle(0x3a0d0d, 1);
-      g.fillEllipse(0, 5.6, 3.4, 4.4);
+      brow(-6, by - 1.2, -1.8, by - 1.8);
+      brow(6, by - 1.2, 1.8, by - 1.8);
+      open(3.4 + opt.talk, 4.4 + opt.talk * 2);
     } else if (emo === 'sad') {
       eyes(2.1, 1.1, 0.6);
-      g.lineBetween(-6.2, -1.8, -1.6, -3.6);
-      g.lineBetween(6.2, -1.8, 1.6, -3.6);
-      g.beginPath();
-      g.arc(0, 7, 2.8, Math.PI + 0.3, 2 * Math.PI - 0.3, false);
-      g.strokePath();
+      brow(-6.2, -1.8, -1.6, -3.6);
+      brow(6.2, -1.8, 1.6, -3.6);
+
+      if (talking) open(3.6, 1.5 + opt.talk * 2.4);
+      else {
+        g.beginPath();
+        g.arc(0, 7, 2.8, Math.PI + 0.3, 2 * Math.PI - 0.3, false);
+        g.strokePath();
+      }
+
       g.fillStyle(0x6ab8ff, 0.9);
       g.fillCircle(-5, 4.4, 1.2);
     } else {
       eyes(2.1, 1.2);
-      g.beginPath();
-      g.arc(0, 3.6, 2.6, 0.3, Math.PI - 0.3, false);
-      g.strokePath();
+      brow(-6, by + 0.2, -1.8, by - 0.4);
+      brow(6, by + 0.2, 1.8, by - 0.4);
+
+      if (talking) open(4.4, 1.5 + opt.talk * 3);
+      else {
+        g.beginPath();
+        g.arc(0, 3.6, 2.6, 0.3, Math.PI - 0.3, false);
+        g.strokePath();
+      }
     }
   }
 }
@@ -6942,6 +7060,8 @@ class GameScene extends BaseScene {
       }
     }
 
+    this.heroVisual.setData('moving', dx !== 0 || dy !== 0);
+
     if (dx === 0 && dy === 0) {
       this.animateLegs(this.heroLegs, 0, false);
       return;
@@ -6980,7 +7100,147 @@ class GameScene extends BaseScene {
     else if (ev === 'revive') text = l.revive;
     else text = l.skill[ev];
 
-    if (text) SFX.say(text, l.pitch, l.rate);
+    if (text) this.speak(this.heroVisual, text, this.heroKind, true);
+  }
+
+  // Balão de fala + boca mexendo (+ voz, se pedido).
+  private speak(v: Phaser.GameObjects.Container, text: string, kind: HeroKind, voice: boolean) {
+    if (!v.active) return;
+
+    v.setData('talk', this.time.now + Math.max(900, text.length * 75));
+    this.floatText(v.x, v.y - 60, text, '#fff0c0', 11);
+
+    if (voice) {
+      const l = HERO_LINES[kind];
+      SFX.say(text, l.pitch, l.rate);
+    }
+  }
+
+  // Rosto vivo e poses de tempos em tempos: ninguém fica estátua.
+  private tickPoses() {
+    const now = this.time.now;
+
+    const act = (v: Phaser.GameObjects.Container, kind: HeroKind, isHero: boolean) => {
+      this.tickFace(v, now);
+
+      const nx = v.getData('nextIdle') as number | undefined;
+
+      if (nx === undefined) {
+        v.setData('nextIdle', now + 3000 + Math.random() * 5000);
+        return;
+      }
+
+      if (now < nx || !v.visible || v.getData('moving')) return;
+
+      v.setData('nextIdle', now + 6000 + Math.random() * 6000);
+      this.doPose(v, kind, isHero);
+    };
+
+    if (!this.heroDead) act(this.heroVisual, this.heroKind, true);
+
+    for (const c of this.companions) act(c.visual, c.kind, false);
+  }
+
+  private doPose(v: Phaser.GameObjects.Container, kind: HeroKind, isHero: boolean) {
+    const fl = v.scaleX < 0 ? -1 : 1;
+    const x = v.x;
+    const y = v.y;
+    const lines = HERO_LINES[kind].idle;
+
+    this.speak(v, lines[Math.floor(Math.random() * lines.length)], kind, isHero && Math.random() < 0.6);
+
+    const reset = () => {
+      if (!v.active) return;
+      v.setAngle(0);
+      v.setScale(fl, 1);
+    };
+
+    if (kind === 'guardiao') {
+      this.emote(v, 'angry', 900);
+
+      this.tweens.add({
+        targets: v, angle: fl * -16, scaleY: 0.92, duration: 200,
+        onComplete: () => {
+          if (!v.active) return;
+
+          SFX.play('slash');
+
+          const arc = this.add.graphics().setDepth(12);
+
+          arc.lineStyle(5, 0xfff2c0, 0.9);
+          arc.beginPath();
+          arc.arc(0, 0, 34, -1.0, 1.0, false);
+          arc.strokePath();
+          arc.setPosition(x + fl * 20, y - 8);
+          arc.setRotation(fl > 0 ? -0.6 : Math.PI + 0.6);
+          arc.setScale(0.7);
+
+          this.tweens.add({
+            targets: arc, scale: 1.2, alpha: 0, duration: 220,
+            onComplete: () => arc.destroy(),
+          });
+
+          this.tweens.add({
+            targets: v, angle: fl * 30, scaleY: 1.06, duration: 110,
+            yoyo: true, hold: 120, onComplete: reset,
+          });
+        },
+      });
+    } else if (kind === 'patrulheiro') {
+      this.emote(v, 'angry', 800);
+
+      this.tweens.add({
+        targets: v, angle: fl * -10, duration: 220,
+        onComplete: () => {
+          if (!v.active) return;
+
+          SFX.play('arrow');
+
+          const arrow = this.add.graphics().setDepth(12);
+
+          arrow.lineStyle(2, 0x8b5a2b, 1);
+          arrow.lineBetween(-9, 0, 7, 0);
+          arrow.fillStyle(0xd8e0e8, 1);
+          arrow.fillTriangle(7, -3, 7, 3, 14, 0);
+          arrow.setPosition(x, y - 14).setRotation(-Math.PI / 2 + fl * 0.3);
+
+          this.tweens.add({
+            targets: arrow, x: x + fl * 40, y: y - 130, alpha: 0, duration: 480,
+            onComplete: () => arrow.destroy(),
+          });
+
+          this.tweens.add({
+            targets: v, angle: fl * 6, duration: 90, yoyo: true, onComplete: reset,
+          });
+        },
+      });
+    } else {
+      this.emote(v, 'happy', 1100);
+      SFX.play('orb');
+
+      const ring = this.add.circle(x, y - 22, 10, 0xb070ff, 0.3)
+        .setStrokeStyle(2, 0xd0a0ff, 0.9)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(12);
+
+      this.tweens.add({
+        targets: ring, scale: 3.4, alpha: 0, duration: 600,
+        onComplete: () => ring.destroy(),
+      });
+
+      for (let k = 0; k < 6; k++) {
+        const sp = this.add.circle(x + (k - 2.5) * 6, y - 10, 2, 0xe6d7ff, 1).setDepth(12);
+
+        this.tweens.add({
+          targets: sp, y: y - 55 - (k % 3) * 8, alpha: 0, duration: 700 + k * 40,
+          onComplete: () => sp.destroy(),
+        });
+      }
+
+      this.tweens.add({
+        targets: v, scaleY: 1.12, duration: 160, yoyo: true, onComplete: reset,
+      });
+    }
   }
 
   private emote(c: Phaser.GameObjects.Container, emo: Emotion, ms = 600) {
@@ -8367,6 +8627,7 @@ class GameScene extends BaseScene {
       c.visual.setPosition(c.x, c.y);
       c.label.setPosition(c.x, c.y - 42);
       this.animateLegs(c.legs, now / 70, moved);
+      c.visual.setData('moving', moved);
 
       c.cd -= delta;
 
@@ -10711,6 +10972,7 @@ class GameScene extends BaseScene {
     this.updateAllies(delta);
     this.updateClones(delta);
     this.updateCompanions(delta);
+    this.tickPoses();
     this.drawTracers(delta);
     this.updateAura();
     this.updateHeroCombat(delta);
