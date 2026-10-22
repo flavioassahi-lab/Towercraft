@@ -938,17 +938,16 @@ function freshEquip(): Record<HeroKind, Record<Gear, number>> {
 //  • Com servidor (recomendado): preencha PAYMENT_API com o endereço do
 //    server.js (Mercado Pago). O servidor cria a cobrança, o banco avisa
 //    quando o dinheiro cai e o jogo libera o pacote sozinho.
-//  • Sem servidor: o jogador paga e manda o comprovante; você confere no
-//    extrato e envia um CÓDIGO DE RESGATE feito na página Resgate Towercraft
-//    (com a mesma frase secreta abaixo). Cada código vale para 1 pacote,
-//    1 vez só, e não precisa de número de pedido.
+//  • Sem servidor: o jogador paga e ANEXA O COMPROVANTE (foto ou PDF) no
+//    próprio jogo, e os diamantes saem na hora. ATENÇÃO: o jogo não consegue
+//    ler o comprovante; ele só exige um arquivo e não aceita o mesmo arquivo
+//    duas vezes neste aparelho. Confira os PIX no seu extrato.
 const PAYMENT_API = '';
-const REDEEM_SECRET = 'troque-esta-frase-secreta-towercraft';
 const ORDERS_KEY = 'towercraft_orders_v1';
 // MODO TESTE: mostra o botão "ZERAR COMPRAS" na loja de diamantes, para você
 // testar as regras do zero. Troque para false antes de publicar o jogo.
 const TEST_MODE = true;
-const USED_CODES_KEY = 'towercraft_used_codes_v1';
+const RECEIPTS_KEY = 'towercraft_receipts_v1';
 const PIX_KEY = 'flavioassahi@gmail.com';
 const PIX_NAME = 'FLAVIO ASSAHI';
 const PIX_CITY = 'SAO PAULO';
@@ -963,6 +962,9 @@ const PIX_PACKS = [
 const DIAMOND_KEY = 'towercraft_diamonds_v1';
 
 const AURA_RANGE = 190;
+
+// Raio da fonte de vida perto da fortaleza.
+const FOUNTAIN_RANGE = 150;
 
 const DIAMOND_COST = { tower: 15, ally: 15, ult: 20, cast: 5, life: 5 };
 
@@ -1041,9 +1043,8 @@ function clearSave() {
   }
 }
 
-// Cada pacote diz exatamente o que entrega. Os itens são liberados
-// AUTOMATICAMENTE assim que o pagamento é confirmado. Se você já tiver algum
-// item do pacote, ele vira diamantes (nada se perde).
+// PIX compra DIAMANTES. Com os diamantes o jogador compra itens avulsos ou
+// pacotes na aba PACOTES da loja (liberados na hora do clique).
 type PackItem = 'lv6all' | 'alliesAll' | 'ult';
 
 type DiamondPack = {
@@ -1057,32 +1058,27 @@ type DiamondPack = {
 };
 
 const DIAMOND_PACKS: DiamondPack[] = [
-  {
-    id: 'avulso', title: 'AVULSO', label: 'R$ 15,00', value: 15, diamonds: 15, items: [],
-    desc: '◆15 para gastar onde quiser: 1 torre nv.6 OU 1 aliado.',
-  },
-  {
-    id: 'ultimate', title: 'ULTIMATE', label: 'R$ 20,00', value: 20, diamonds: 0, items: ['ult'],
-    desc: 'Libera na hora o ultimate de todos os heróis.',
-  },
-  {
-    id: 'torres', title: 'TORRES', label: 'R$ 30,00', value: 30, diamonds: 0, items: ['lv6all'],
-    desc: 'Libera na hora o nível 6 da Guardiã, Balista e Arcana.',
-  },
-  {
-    id: 'aliados', title: 'ALIADOS', label: 'R$ 30,00', value: 30, diamonds: 0, items: ['alliesAll'],
-    desc: 'Cão de Guerra + Soldado + Drone entram na hora ao seu lado.',
-  },
-  {
-    id: 'guerreiro', title: 'GUERREIRO', label: 'R$ 40,00', value: 40, diamonds: 0, items: ['lv6all', 'ult'],
-    desc: 'Nível 6 das 3 torres + ultimate, tudo liberado na hora.',
-  },
-  {
-    id: 'completo', title: 'COMPLETO', label: 'R$ 60,00', value: 60, diamonds: 0,
-    items: ['lv6all', 'alliesAll', 'ult'],
-    desc: 'Nível 6 das 3 torres + os 3 aliados + ultimate, tudo na hora.',
-  },
+  { id: 'd15', title: '◆15', label: 'R$ 15,00', value: 15, diamonds: 15, items: [], desc: '15 diamantes.' },
+  { id: 'd25', title: '◆25', label: 'R$ 20,00', value: 20, diamonds: 25, items: [], desc: '25 diamantes (5 de bônus).' },
+  { id: 'd45', title: '◆45', label: 'R$ 30,00', value: 30, diamonds: 45, items: [], desc: '45 diamantes (15 de bônus).' },
+  { id: 'd65', title: '◆65', label: 'R$ 40,00', value: 40, diamonds: 65, items: [], desc: '65 diamantes (25 de bônus).' },
+  { id: 'd110', title: '◆110', label: 'R$ 60,00', value: 60, diamonds: 110, items: [], desc: '110 diamantes (50 de bônus). Dá para o pacote COMPLETO.' },
 ];
+
+// Pacotes pagos com diamantes. O preço é o dos itens que faltam, com
+// desconto; itens que você já tem não são cobrados.
+const ITEM_BUNDLES: Array<{ id: string; title: string; items: PackItem[]; off: number; desc: string }> = [
+  { id: 'torres', title: 'TORRES', items: ['lv6all'], off: 0.1, desc: 'Nível 6 da Guardiã, Balista e Arcana.' },
+  { id: 'aliados', title: 'ALIADOS', items: ['alliesAll'], off: 0.1, desc: 'Cão de Guerra + Soldado + Drone.' },
+  { id: 'guerreiro', title: 'GUERREIRO', items: ['lv6all', 'ult'], off: 0.15, desc: '3 torres nível 6 + ultimate.' },
+  { id: 'completo', title: 'COMPLETO', items: ['lv6all', 'alliesAll', 'ult'], off: 0.2, desc: '3 torres nv.6 + 3 aliados + ultimate.' },
+];
+
+// Troca de moedas por diamantes: cara de propósito.
+const COINS_PER_DIAMOND = 6000;
+
+// Refazer a onda depois de perder.
+const RETRY_COST = 5;
 
 // ---------- pedidos e códigos de resgate ----------
 type PixOrder = { order: string; pack: string; at: number; remote?: string };
@@ -1111,48 +1107,14 @@ function newOrderCode(): string {
   return out;
 }
 
-// Código de resgate: 1 letra do pacote + 4 caracteres sorteados + 4 de
-// assinatura (ex.: C7K2M9QXT). Mesmo cálculo da página Resgate Towercraft.
 const CODE_ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const PACK_LETTER: Record<string, string> = {
-  avulso: 'A', ultimate: 'U', torres: 'T', aliados: 'L', guerreiro: 'G', completo: 'C',
-};
 
-function codeSignature(letter: string, nonce: string): string {
-  const input = `${REDEEM_SECRET}|${letter}|${nonce}`;
-  let h = 0x811c9dc5;
+// Comprovantes já usados neste aparelho (impressão digital do arquivo).
+type ReceiptLog = { hash: string; pack: string; name: string; at: number };
 
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-
-  let out = '';
-  for (let i = 0; i < 4; i++) {
-    out += CODE_ABC[h % 32];
-    h = Math.floor(h / 32);
-  }
-
-  return out;
-}
-
-// Devolve o id do pacote se o código for válido, ou null.
-function checkRedeemCode(raw: string): string | null {
-  const c = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-  if (c.length !== 9) return null;
-
-  const letter = c[0];
-  const pack = Object.keys(PACK_LETTER).find(k => PACK_LETTER[k] === letter);
-
-  if (!pack) return null;
-
-  return codeSignature(letter, c.slice(1, 5)) === c.slice(5) ? pack : null;
-}
-
-function loadUsedCodes(): string[] {
+function loadReceipts(): ReceiptLog[] {
   try {
-    const raw = localStorage.getItem(USED_CODES_KEY);
+    const raw = localStorage.getItem(RECEIPTS_KEY);
     const list = raw ? JSON.parse(raw) : [];
     return Array.isArray(list) ? list : [];
   } catch {
@@ -1160,68 +1122,42 @@ function loadUsedCodes(): string[] {
   }
 }
 
-function markCodeUsed(code: string) {
+function saveReceipt(r: ReceiptLog) {
   try {
-    localStorage.setItem(USED_CODES_KEY, JSON.stringify([...loadUsedCodes(), code]));
+    localStorage.setItem(RECEIPTS_KEY, JSON.stringify([...loadReceipts(), r].slice(-100)));
   } catch {
     // ignora
   }
 }
 
-// Caixa de texto por cima do jogo (funciona no celular e no StackBlitz).
-function askCode(onDone: (value: string | null) => void) {
-  const wrap = document.createElement('div');
-  wrap.style.cssText =
-    'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.75);display:flex;' +
-    'align-items:center;justify-content:center;padding:16px;font-family:Arial,sans-serif';
+async function fileHash(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
 
-  const box = document.createElement('div');
-  box.style.cssText =
-    'background:#14191d;border:2px solid #c9a24d;border-radius:10px;padding:18px;' +
-    'width:100%;max-width:360px;display:flex;flex-direction:column;gap:12px;color:#efe6cc';
+  if (window.crypto?.subtle) {
+    const dig = await window.crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(dig)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
 
-  const title = document.createElement('div');
-  title.textContent = 'Digite o código de resgate';
-  title.style.cssText = 'font:bold 17px Georgia,serif;color:#f0d58a';
-
-  const input = document.createElement('input');
-  input.placeholder = 'Ex.: C7K2M9QXT';
-  input.autocomplete = 'off';
-  input.style.cssText =
-    'font:20px monospace;letter-spacing:3px;padding:10px;border-radius:6px;' +
-    'border:1px solid #6e5524;background:#0b0e11;color:#fff;text-transform:uppercase';
-
-  const row = document.createElement('div');
-  row.style.cssText = 'display:flex;gap:10px';
-
-  const mk = (label: string, bg: string) => {
-    const b = document.createElement('button');
-    b.textContent = label;
-    b.style.cssText =
-      `flex:1;padding:12px;border:0;border-radius:6px;font:bold 15px Arial;color:#fff;background:${bg};cursor:pointer`;
-    return b;
-  };
-
-  const cancel = mk('Cancelar', '#3a4046');
-  const ok = mk('Resgatar', '#1f7a5a');
-
-  const close = (v: string | null) => {
-    wrap.remove();
-    onDone(v);
-  };
-
-  cancel.onclick = () => close(null);
-  ok.onclick = () => close(input.value);
-  input.onkeydown = e => {
-    if (e.key === 'Enter') close(input.value);
-  };
-
-  row.append(cancel, ok);
-  box.append(title, input, row);
-  wrap.append(box);
-  document.body.append(wrap);
-  setTimeout(() => input.focus(), 50);
+  return `${file.name}|${file.size}|${file.lastModified}`;
 }
+
+// Abre o seletor de arquivo (galeria/câmera no celular).
+function pickReceipt(onFile: (f: File) => void) {
+  const input = document.createElement('input');
+
+  input.type = 'file';
+  input.accept = 'image/*,application/pdf';
+  input.style.display = 'none';
+  input.onchange = () => {
+    const f = input.files?.[0];
+    input.remove();
+    if (f) onFile(f);
+  };
+
+  document.body.append(input);
+  input.click();
+}
+
 
 type DiamondSave = {
   diamonds: number;
@@ -3115,7 +3051,8 @@ class GameScene extends BaseScene {
   protected contextTitle?: Phaser.GameObjects.Text;
 
   private heroSelected = false;
-  private shopTab: 'armor' | 'allies' = 'armor';
+  private shopTab: 'armor' | 'allies' | 'packs' = 'armor';
+  private waveSnap: SaveData | null = null;
   private allyPreview: AllyKind | null = null;
   private allyCharges = 3;
   private lifeCharges = 3;
@@ -3203,6 +3140,7 @@ class GameScene extends BaseScene {
     this.ultCharges = 3;
     this.lifeCharges = 3;
     this.shopTab = 'armor';
+    this.waveSnap = null;
     this.allyPreview = null;
 
     this.coins = data?.coins ?? 200;
@@ -3499,11 +3437,8 @@ class GameScene extends BaseScene {
   }
 
   // Devolve null se salvou, ou o motivo de não poder salvar.
-  private saveGame(): string | null {
-    if (this.finalChoice !== null || this.fused) {
-      return 'Não dá para salvar no Mundo Supremo/Real nem com heróis fundidos.';
-    }
-
+  // Foto do jogo agora (usada para salvar e para refazer a onda).
+  private snapshot(): SaveData {
     const active = this.activeWaves.size > 0 || this.enemies.some(e => e.alive);
 
     const data: SaveData = {
@@ -3543,7 +3478,16 @@ class GameScene extends BaseScene {
       repeatGate: this.repeatGate,
     };
 
-    return writeSave(data) ? null : 'Não foi possível salvar neste navegador.';
+    return data;
+  }
+
+  // Devolve null se salvou, ou o motivo de não poder salvar.
+  private saveGame(): string | null {
+    if (this.finalChoice !== null || this.fused) {
+      return 'Não dá para salvar no Mundo Supremo/Real nem com heróis fundidos.';
+    }
+
+    return writeSave(this.snapshot()) ? null : 'Não foi possível salvar neste navegador.';
   }
 
   // +10 de vida da fortaleza: 3 grátis, depois ◆5 cada.
@@ -6948,6 +6892,15 @@ class GameScene extends BaseScene {
 
   private launchWave(next: number) {
     this.closeContextMenu();
+
+    // Guarda como estava antes desta onda, para poder refazê-la se perder.
+    if (
+      this.finalChoice === null && !this.fused
+      && this.activeWaves.size === 0 && !this.enemies.some(e => e.alive)
+    ) {
+      this.waveSnap = this.snapshot();
+    }
+
     this.wave = next;
 
     const waveId = next;
@@ -10058,16 +10011,16 @@ class GameScene extends BaseScene {
 
     const g = this.fountainGfx;
     const near = !this.heroDead
-      && Phaser.Math.Distance.Between(this.hero.x, this.hero.y, fx, fy) <= 75;
+      && Phaser.Math.Distance.Between(this.hero.x, this.hero.y, fx, fy) <= FOUNTAIN_RANGE;
     const healing = near && this.heroHp < this.heroMaxHp;
 
     g.clear();
 
     // Área de cura
     g.fillStyle(0x4cd9ff, healing ? 0.14 : 0.06);
-    g.fillCircle(fx, fy, 75);
+    g.fillCircle(fx, fy, FOUNTAIN_RANGE);
     g.lineStyle(2, 0x7fe8ff, healing ? 0.7 + 0.3 * Math.sin(now / 120) : 0.3);
-    g.strokeCircle(fx, fy, 75);
+    g.strokeCircle(fx, fy, FOUNTAIN_RANGE);
 
     // Bacia de pedra e água
     g.fillStyle(0x5a5a52, 1);
@@ -11116,21 +11069,28 @@ class GameScene extends BaseScene {
 
     // ---------- abas ----------
     const armorOn = this.shopTab === 'armor';
+    const packsOn = this.shopTab === 'packs';
 
     button(
-      40, 304, 'ARMADURA', armorOn ? '#8a6a22' : '#2a2f33',
-      () => { this.shopTab = 'armor'; this.openHeroPanel(); }, 14, 255, 38,
+      40, 304, 'ARMADURA · MOEDAS', armorOn ? '#8a6a22' : '#2a2f33',
+      () => { this.shopTab = 'armor'; this.openHeroPanel(); }, 12, 170, 38,
     );
     button(
-      305, 304, 'ALIADOS', !armorOn ? '#3a5aa0' : '#2a2f33',
-      () => { this.shopTab = 'allies'; this.openHeroPanel(); }, 14, 255, 38,
+      215, 304, 'ALIADOS · ◆', this.shopTab === 'allies' ? '#3a5aa0' : '#2a2f33',
+      () => { this.shopTab = 'allies'; this.openHeroPanel(); }, 12, 170, 38,
+    );
+    button(
+      390, 304, 'TORRES E PACOTES · ◆', packsOn ? '#3a5aa0' : '#2a2f33',
+      () => { this.shopTab = 'packs'; this.openHeroPanel(); }, 12, 170, 38,
     );
 
     panel.lineStyle(1, GOLD, 0.6);
     panel.lineBetween(40, 352, 560, 352);
 
-    if (armorOn) {
-      label(40, 360, 'Melhore a armadura com moedas. O efeito vale para este herói.', 11, '#b9d6c0');
+    if (packsOn) {
+      this.drawPacksTab(label, button, panel);
+    } else if (armorOn) {
+      label(40, 360, 'PAGO COM MOEDAS · melhore a armadura. O efeito vale para este herói.', 11, '#b9d6c0');
 
       GEAR_SLOTS.forEach((slot, n) => {
         const y = 384 + n * 86;
@@ -11167,7 +11127,7 @@ class GameScene extends BaseScene {
     } else {
       label(
         40, 360,
-        `Comprados ficam com você na partida (máx. 2 de cada). A habilidade ALIADOS chama os 3 por 1 min · grátis ${this.allyCharges}/3 · depois ◆${DIAMOND_COST.cast}.`,
+        `PAGO COM DIAMANTES · ficam com você na partida (máx. 2 de cada). A habilidade ALIADOS chama os 3 por 1 min · grátis ${this.allyCharges}/3 · depois ◆${DIAMOND_COST.cast}.`,
         10, '#b9d6c0',
       ).setWordWrapWidth(520);
 
@@ -11239,8 +11199,28 @@ class GameScene extends BaseScene {
     // ---------- recursos ----------
     label(40, 656, `MOEDAS: ${this.coins}     DIAMANTES: ◆${this.diamonds}`, 15, '#ffe08a', true);
 
-    button(40, 686, 'COMPRAR MOEDAS · PIX', '#1f7a5a', () => this.openPixShop(), 12, 255, 38);
-    button(305, 686, 'COMPRAR DIAMANTES', '#3a5aa0', () => this.openDiamondShop(), 12, 255, 38);
+    // Moedas juntadas na CIDADE ficam no cofre até serem sacadas aqui.
+    const bank = loadBank();
+
+    if (bank > 0 && this.finalChoice !== 'tech') {
+      button(
+        392, 650, `SACAR COFRE · ${bank}`, '#5a6a2a',
+        () => {
+          const got = takeBank();
+
+          this.coins += got;
+          SFX.play('coin');
+          this.refreshInterface();
+          this.openHeroPanel();
+          this.panelNote?.setText(`+${got} moedas da cidade entraram no jogo!`).setColor('#9fe3b0');
+        },
+        11, 168, 28,
+      );
+    }
+
+    button(40, 686, 'MOEDAS · PIX', '#1f7a5a', () => this.openPixShop(), 12, 168, 38);
+    button(216, 686, 'DIAMANTES · PIX', '#3a5aa0', () => this.openDiamondPix(), 12, 168, 38);
+    button(392, 686, 'MOEDAS → ◆', '#8a6a22', () => this.openExchange(), 12, 168, 38);
 
     if (this.upgradeAvailable()) {
       const up = this.nextUpgrade() as number;
@@ -12052,79 +12032,153 @@ class GameScene extends BaseScene {
   }
 
   private openDiamondShop(note = '') {
-    const { text, button } = this.diaModal(
-      40, 150, 520, 720, `LOJA DE DIAMANTES  ◆ ${this.diamonds}`,
-    );
+    this.shopTab = 'packs';
+    this.openHeroPanel();
+    if (note) this.panelNote?.setText(note).setColor('#9fe3b0');
+  }
 
-    text(60, 196, note || 'Diamantes e pacotes vêm por PIX. Torres nv.6 e ultimate são permanentes; aliados ficam na partida.', 11, note ? '#9fe3b0' : '#d9d0b7');
+  // O que falta comprar de um pacote e quanto custa (com desconto).
+  private bundlePrice(items: PackItem[], off: number): { missing: number; price: number } {
+    let sum = 0;
+    let missing = 0;
 
-    const kinds: TowerKind[] = ['basic', 'rapid', 'sniper'];
+    for (const it of items) {
+      if (it === 'lv6all') {
+        for (const k of ['basic', 'rapid', 'sniper'] as TowerKind[]) {
+          if (!this.lv6[k]) { sum += DIAMOND_COST.tower; missing++; }
+        }
+      } else if (it === 'ult') {
+        if (!this.ultUnlocked) { sum += DIAMOND_COST.ult; missing++; }
+      } else if (this.finalChoice !== 'tech') {
+        for (const k of ['dog', 'human', 'drone'] as AllyKind[]) {
+          if (this.allyCount(k) < 2) { sum += DIAMOND_COST.ally; missing++; }
+        }
+      }
+    }
 
-    text(60, 246, 'TORRE NÍVEL 6 · empurra os monstros para trás', 12, '#f0d58a');
+    return { missing, price: Math.ceil(sum * (1 - off)) };
+  }
 
-    kinds.forEach((k, i) => {
+  private drawPacksTab(
+    label: (x: number, y: number, t: string, size: number, color: string, bold?: boolean) => Phaser.GameObjects.Text,
+    button: (x: number, y: number, t: string, color: string, action: () => void, size: number, w: number, h: number) => Phaser.GameObjects.Container,
+    panel: Phaser.GameObjects.Graphics,
+  ) {
+    label(40, 360, 'PAGO COM DIAMANTES · itens avulsos', 11, '#9fd0ff', true);
+
+    (['basic', 'rapid', 'sniper'] as TowerKind[]).forEach((k, i) => {
       const owned = this.lv6[k];
 
       button(
-        60 + i * 164, 270,
-        owned ? `${TOWER_STATS[k].name} · LIBERADA` : `${TOWER_STATS[k].name} · ◆${DIAMOND_COST.tower}`,
+        40 + i * 175, 380,
+        owned ? `${TOWER_STATS[k].name} NV.6 ✓` : `${TOWER_STATS[k].name} NV.6 · ◆${DIAMOND_COST.tower}`,
         owned ? '#2b302b' : '#3a5aa0',
-        () => this.buyTowerLv6(k), 156, 36,
+        () => this.buyTowerLv6(k), 11, 170, 32,
       );
     });
-
-    text(60, 330, 'ALIADOS · cada compra traz 1 aliado (máx. 2 de cada tipo)', 12, '#f0d58a');
-
-    const allyRow: [AllyKind, string][] = [['dog', 'CÃO'], ['human', 'SOLDADO'], ['drone', 'DRONE']];
-
-    allyRow.forEach(([k, name], i) => {
-      button(
-        60 + i * 164, 354,
-        `${name} ${this.allyCount(k)}/2 · ◆${DIAMOND_COST.ally}`,
-        '#3a5aa0',
-        () => this.buyAlly(k), 156, 36,
-      );
-    });
-
-    text(60, 414, 'ULTIMATE · a 4ª habilidade de cada herói', 12, '#f0d58a');
 
     button(
-      60, 438,
-      this.ultUnlocked ? 'ULTIMATE LIBERADO' : `LIBERAR ULTIMATE · ◆${DIAMOND_COST.ult}`,
+      40, 418,
+      this.ultUnlocked || this.finalChoice === 'tech'
+        ? 'ULTIMATE LIBERADO PARA SEMPRE ✓'
+        : `ULTIMATE PARA SEMPRE (todos os heróis) · ◆${DIAMOND_COST.ult}`,
       this.ultUnlocked ? '#2b302b' : '#7a3aa0',
-      () => this.buyUlt(), 480, 36,
+      () => this.buyUlt(), 11, 520, 32,
     );
 
-    button(
-      60, 500, 'COMPRAR DIAMANTES COM PIX', '#1f7a5a',
-      () => this.openDiamondPix(), 480, 42, 13,
-    );
+    panel.lineStyle(1, GOLD_DARK, 1);
+    panel.lineBetween(40, 460, 560, 460);
 
-    text(
-      60, 556,
-      'PACOTES · liberados automaticamente após a confirmação do pagamento\n\n' +
-      DIAMOND_PACKS.map(p => `${p.label} · ${p.title}: ${p.desc}`).join('\n'),
-      10, '#cfe8ff',
-    );
+    label(40, 466, 'PACOTES · tudo é liberado na hora do clique', 11, '#9fd0ff', true);
 
-    if (TEST_MODE) {
+    ITEM_BUNDLES.forEach((b, i) => {
+      const x = 40 + (i % 2) * 265;
+      const y = 488 + Math.floor(i / 2) * 78;
+      const { missing, price } = this.bundlePrice(b.items, b.off);
+      const done = missing === 0;
+
+      panel.fillStyle(0x0d1114, 0.95);
+      panel.fillRoundedRect(x, y, 255, 70, 6);
+      panel.lineStyle(1, done ? 0x3a4046 : GOLD_DARK, 1);
+      panel.strokeRoundedRect(x, y, 255, 70, 6);
+
+      label(x + 10, y + 6, b.title, 13, '#f0d58a', true);
+      label(x + 10, y + 26, b.desc, 10, '#d9d0b7').setWordWrapWidth(235);
+
       button(
-        60, 752, 'TESTE · ZERAR COMPRAS E DIAMANTES', '#6a2a2a',
-        () => this.openModal(
-          'ZERAR COMPRAS?',
-          'Remove os diamantes, o nível 6 das torres e o ultimate liberados neste aparelho, e os aliados comprados nesta partida. Os usos grátis voltam para 3. Só para teste.',
-          [
-            { label: 'ZERAR', color: '#8a3a2c', action: () => this.resetPurchases() },
-            { label: 'CANCELAR', color: '#3a4046', action: () => this.openDiamondShop() },
-          ],
-        ),
-        480, 34, 11,
+        x + 120, y + 40,
+        done ? 'VOCÊ JÁ TEM TUDO' : `COMPRAR · ◆${price}`,
+        done ? '#2b302b' : '#1f6a8a',
+        () => this.buyBundle(b.id), 11, 128, 26,
+      );
+
+      if (!done) label(x + 10, y + 48, `-${Math.round(b.off * 100)}%`, 11, '#7dff9a', true);
+    });
+
+  }
+
+  private buyBundle(id: string) {
+    const b = ITEM_BUNDLES.find(x => x.id === id);
+
+    if (!b) return;
+
+    const { missing, price } = this.bundlePrice(b.items, b.off);
+
+    if (missing === 0) return this.openDiamondShop('Você já tem tudo deste pacote.');
+
+    if (this.diamonds < price) {
+      return this.openDiamondShop(
+        `Faltam diamantes: o pacote custa ◆${price} e você tem ◆${this.diamonds}. Compre por PIX ou troque moedas.`,
       );
     }
 
-    button(60, 800, 'VOLTAR', '#3a4046', () => this.openHeroPanel(), 480, 40, 12);
+    this.diamonds -= price;
+
+    const msg = this.deliverPack({
+      id: b.id, title: b.title, label: '', value: 0, diamonds: 0, items: b.items, desc: b.desc,
+    }, false);
+
+    this.openDiamondShop(`${msg}  (−◆${price})`);
   }
 
+  // Moedas → diamantes, bem caro de propósito.
+  private openExchange(note = '') {
+    if (this.finalChoice === 'tech') {
+      this.openHeroPanel();
+      this.panelNote?.setText('Nos céus as moedas são infinitas: a troca por diamantes fica bloqueada.');
+      return;
+    }
+
+    const can = Math.floor(this.coins / COINS_PER_DIAMOND);
+    const body =
+      `Cada diamante custa ${COINS_PER_DIAMOND} moedas.\n\n` +
+      `Você tem ${this.coins} moedas (dá para ◆${can}) e ◆${this.diamonds}.` +
+      (note ? `\n\n${note}` : '');
+
+    const trade = (n: number) => {
+      const cost = n * COINS_PER_DIAMOND;
+
+      if (this.coins < cost) {
+        this.openExchange(`Moedas insuficientes para ◆${n} (precisa de ${cost}).`);
+        return;
+      }
+
+      this.coins -= cost;
+      this.diamonds += n;
+      this.saveDia();
+      SFX.play('coin');
+      this.refreshInterface();
+      this.openExchange(`Trocou ${cost} moedas por ◆${n}!`);
+    };
+
+    this.openModal('TROCAR MOEDAS POR DIAMANTES', body, [
+      { label: `◆1 · ${COINS_PER_DIAMOND}`, color: '#8a6a22', action: () => trade(1) },
+      { label: `◆5 · ${COINS_PER_DIAMOND * 5}`, color: '#8a6a22', action: () => trade(5) },
+      { label: 'VOLTAR', color: '#3a4046', action: () => this.openHeroPanel() },
+    ]);
+  }
+
+  // Só para teste: zera diamantes e compras deste aparelho.
   private resetPurchases() {
     this.diamonds = 0;
     this.lv6 = { basic: false, rapid: false, sniper: false };
@@ -12137,7 +12191,7 @@ class GameScene extends BaseScene {
     this.allies = this.allies.filter(x => x.until);
 
     try {
-      localStorage.removeItem(USED_CODES_KEY);
+      localStorage.removeItem(RECEIPTS_KEY);
       localStorage.removeItem(ORDERS_KEY);
     } catch {
       // ignora
@@ -12152,7 +12206,7 @@ class GameScene extends BaseScene {
     if (this.lv6[k]) return this.openDiamondShop('Esta torre já está liberada.');
 
     if (this.diamonds < DIAMOND_COST.tower) {
-      return this.openDiamondShop('Diamantes insuficientes. Compre um pacote por PIX.');
+      return this.openDiamondShop('Diamantes insuficientes. Compre por PIX ou troque moedas (MOEDAS → ◆).');
     }
 
     this.diamonds -= DIAMOND_COST.tower;
@@ -12161,28 +12215,11 @@ class GameScene extends BaseScene {
     this.openDiamondShop(`Nível 6 liberado para a torre ${TOWER_STATS[k].name}! Melhore uma torre nível 5.`);
   }
 
-  private buyAlly(k: AllyKind) {
-    if (this.finalChoice === 'tech') {
-      return this.openDiamondShop('No Mundo Supremo os aliados não existem.');
-    }
-
-    if (this.allyCount(k) >= 2) return this.openDiamondShop('Você já tem 2 aliados deste tipo.');
-
-    if (this.diamonds < DIAMOND_COST.ally) {
-      return this.openDiamondShop('Diamantes insuficientes. Compre um pacote por PIX.');
-    }
-
-    this.diamonds -= DIAMOND_COST.ally;
-    this.saveDia();
-    this.spawnAllies(k, 1);
-    this.openDiamondShop('Aliado comprado! Ele já está ao seu lado.');
-  }
-
   private buyUlt() {
     if (this.ultUnlocked) return this.openDiamondShop('O ultimate já está liberado.');
 
     if (this.diamonds < DIAMOND_COST.ult) {
-      return this.openDiamondShop('Diamantes insuficientes. Compre um pacote por PIX.');
+      return this.openDiamondShop('Diamantes insuficientes. Compre por PIX ou troque moedas (MOEDAS → ◆).');
     }
 
     this.diamonds -= DIAMOND_COST.ult;
@@ -12199,7 +12236,7 @@ class GameScene extends BaseScene {
   }
 
   // Entrega o conteúdo do pacote. Item que a pessoa já tem vira diamante.
-  private deliverPack(p: DiamondPack): string {
+  private deliverPack(p: DiamondPack, refund = true): string {
     const got: string[] = [];
     let extra = p.diamonds;
 
@@ -12209,7 +12246,7 @@ class GameScene extends BaseScene {
 
         for (const k of ['basic', 'rapid', 'sniper'] as TowerKind[]) {
           if (this.lv6[k]) {
-            extra += DIAMOND_COST.tower;
+            if (refund) extra += DIAMOND_COST.tower;
           } else {
             this.lv6[k] = true;
             freed.push(TOWER_STATS[k].name);
@@ -12219,7 +12256,7 @@ class GameScene extends BaseScene {
         if (freed.length) got.push(`Nível 6: ${freed.join(', ')}`);
       } else if (item === 'ult') {
         if (this.ultUnlocked) {
-          extra += DIAMOND_COST.ult;
+          if (refund) extra += DIAMOND_COST.ult;
         } else {
           this.ultUnlocked = true;
           got.push('Ultimate liberado');
@@ -12229,7 +12266,7 @@ class GameScene extends BaseScene {
 
         for (const k of ['dog', 'human', 'drone'] as AllyKind[]) {
           if (this.finalChoice === 'tech' || this.allyCount(k) >= 2) {
-            extra += DIAMOND_COST.ally;
+            if (refund) extra += DIAMOND_COST.ally;
           } else {
             this.spawnAllies(k, 1);
             came.push(ALLY_INFO[k].name);
@@ -12288,46 +12325,50 @@ class GameScene extends BaseScene {
     return null;
   }
 
-  private redeemCodeNow(raw: string): string {
-    const code = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  // Confere o arquivo do comprovante e libera os diamantes do pacote.
+  private async acceptReceipt(file: File, pack: DiamondPack): Promise<string> {
+    const okType = file.type.startsWith('image/') || file.type === 'application/pdf';
 
-    if (!code) return '';
+    if (!okType) return 'Envie uma foto (print) ou PDF do comprovante.';
+    if (file.size < 8 * 1024) return 'Arquivo pequeno demais para ser um comprovante. Envie o print completo.';
+    if (file.size > 15 * 1024 * 1024) return 'Arquivo grande demais (máx. 15 MB).';
 
-    const packId = checkRedeemCode(code);
+    const hash = await fileHash(file);
 
-    if (!packId) return 'Código inválido. Confira se digitou todas as letras e números.';
+    if (loadReceipts().some(r => r.hash === hash)) {
+      return 'Este comprovante já foi usado. Cada pagamento libera diamantes uma vez só.';
+    }
 
-    if (loadUsedCodes().includes(code)) return 'Este código já foi usado.';
+    saveReceipt({ hash, pack: pack.id, name: file.name, at: Date.now() });
 
-    const pack = DIAMOND_PACKS.find(p => p.id === packId);
-
-    if (!pack) return 'Pacote não encontrado.';
-
-    markCodeUsed(code);
     return this.deliverPack(pack);
   }
 
   private openDiamondPix(msg = '') {
     this.stopPixPoll();
 
-    const { text, button } = this.diaModal(40, 110, 520, 780, 'COMPRAR COM PIX');
+    const { text, button } = this.diaModal(40, 110, 520, 780, `COMPRAR DIAMANTES · PIX  ◆${this.diamonds}`);
 
     text(
       60, 156,
       PAYMENT_API
-        ? 'Escolha o pacote: o código PIX é copiado. Pague no app do banco e aguarde: assim que o banco confirmar, os itens entram sozinhos.'
-        : 'Escolha o pacote: o código PIX é copiado. Pague no app do banco e envie o comprovante. Você recebe um código de resgate que libera os itens.',
+        ? 'Escolha a quantidade: o código PIX é copiado. Pague no app do banco e aguarde: assim que o banco confirmar, os diamantes entram sozinhos.'
+        : '1) Escolha a quantidade: o código PIX é copiado.  2) Pague no app do banco.  3) Toque em ANEXAR COMPROVANTE e escolha a foto ou o PDF do comprovante. Os diamantes entram na hora.',
       11, '#efe6cc',
     );
 
     const note = text(60, 566, msg, 11, msg ? '#9fe3b0' : '#9fe3b0');
+    let chosen: DiamondPack | null = null;
 
     DIAMOND_PACKS.forEach((p, i) => {
       const y = 214 + i * 57;
 
       button(
-        60, y, `${p.label} · ${p.title}${p.diamonds ? ` · ◆${p.diamonds}` : ''}`, '#1f7a5a',
-        () => this.startPixOrder(p, note),
+        60, y, `${p.label}  →  ${p.title}`, '#1f7a5a',
+        () => {
+          chosen = p;
+          this.startPixOrder(p, note);
+        },
         480, 32, 12,
       );
 
@@ -12336,7 +12377,7 @@ class GameScene extends BaseScene {
 
     button(
       60, 760,
-      PAYMENT_API ? 'VERIFICAR PAGAMENTO' : 'TENHO UM CÓDIGO DE RESGATE',
+      PAYMENT_API ? 'VERIFICAR PAGAMENTO' : 'ANEXAR COMPROVANTE E LIBERAR',
       '#8a6a22',
       () => {
         if (PAYMENT_API) {
@@ -12348,17 +12389,37 @@ class GameScene extends BaseScene {
           return;
         }
 
-        askCode(value => {
-          if (value === null) return;
+        const pack = chosen;
 
-          const res = this.redeemCodeNow(value);
+        if (!pack) {
+          note.setColor('#ffd9a0').setText('Escolha primeiro a quantidade que você pagou.');
+          return;
+        }
 
-          if (res.startsWith('Pacote')) this.openDiamondShop(res);
-          else if (res && note.active) note.setColor('#ffb0a0').setText(res);
+        pickReceipt(file => {
+          void this.acceptReceipt(file, pack).then(res => {
+            if (res.startsWith('Pacote')) this.openDiamondShop(res);
+            else if (note.active) note.setColor('#ffb0a0').setText(res);
+          });
         });
       },
       480, 44, 12,
     );
+
+    if (TEST_MODE) {
+      button(
+        60, 712, 'TESTE · ZERAR COMPRAS E DIAMANTES', '#6a2a2a',
+        () => this.openModal(
+          'ZERAR COMPRAS?',
+          'Remove os diamantes, o nível 6 das torres e o ultimate liberados neste aparelho, e os aliados comprados nesta partida. Os usos grátis voltam para 3. Só para teste.',
+          [
+            { label: 'ZERAR', color: '#8a3a2c', action: () => this.resetPurchases() },
+            { label: 'CANCELAR', color: '#3a4046', action: () => this.openDiamondPix() },
+          ],
+        ),
+        480, 34, 11,
+      );
+    }
 
     button(60, 830, 'VOLTAR', '#3a4046', () => {
       this.stopPixPoll();
@@ -12427,8 +12488,7 @@ class GameScene extends BaseScene {
     copy(
       buildPixPayload(p.value),
       `Pacote ${p.title} (${p.label}).\n` +
-      `Depois de pagar, envie o comprovante para ${PIX_KEY}. ` +
-      'Você recebe um código de resgate; toque em TENHO UM CÓDIGO DE RESGATE.',
+      'Depois de pagar, toque em ANEXAR COMPROVANTE E LIBERAR.',
     );
   }
 
@@ -12885,7 +12945,10 @@ class GameScene extends BaseScene {
     this.refreshInterface();
   }
 
-  private showEndPanel(title: string, color: string, text: string) {
+  private showEndPanel(
+    title: string, color: string, text: string,
+    retry?: { label: string; action: (note: Phaser.GameObjects.Text) => void },
+  ) {
     this.gameOver = true;
     this.cancelBuild();
     this.closeContextMenu();
@@ -12895,7 +12958,7 @@ class GameScene extends BaseScene {
       .setDepth(39);
 
     const panel = this.add.graphics().setDepth(40);
-    this.drawPanelFrame(panel, 45, 380, 510, 250, 10);
+    this.drawPanelFrame(panel, 45, 380, 510, retry ? 320 : 250, 10);
 
     this.add.text(300, 440, title, {
       fontFamily: 'Georgia, serif',
@@ -12914,8 +12977,24 @@ class GameScene extends BaseScene {
       lineSpacing: 7,
     }).setOrigin(0.5).setDepth(41);
 
+    const note = this.add.text(300, 660, '', {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: '12px',
+      color: '#ffb0a0',
+      align: 'center',
+      wordWrap: { width: 470 },
+    }).setOrigin(0.5).setDepth(41);
+
+    if (retry) {
+      this.makeButton(
+        100, 556, retry.label, '#2f6a45',
+        () => retry.action(note),
+        14, 400, 42, true,
+      ).setDepth(42);
+    }
+
     const back = this.makeButton(
-      150, 560, 'VOLTAR AO EMPÓRIO', '#8a3a2c',
+      150, retry ? 606 : 560, 'VOLTAR AO EMPÓRIO', '#8a3a2c',
       () => this.scene.start('ShopScene'),
       13, 300, 40, true,
     );
@@ -12927,10 +13006,42 @@ class GameScene extends BaseScene {
     SFX.play('defeat');
     this.showMessage('FIM DE JOGO!');
 
+    const snap = this.waveSnap;
+
+    if (!snap) {
+      this.showEndPanel(
+        'DERROTA',
+        '#e8574c',
+        'A fortaleza foi derrotada.\nVolte ao empório e monte uma nova estratégia.',
+      );
+      return;
+    }
+
+    const again = snap.wave + 1;
+
     this.showEndPanel(
       'DERROTA',
       '#e8574c',
-      'A fortaleza foi derrotada.\nVolte ao empório e monte uma nova estratégia.',
+      `A fortaleza foi derrotada na onda ${again}.\nRefaça esta onda do jeito que estava antes dela\n(torres, moedas, nível e armadura) ou recomece.`,
+      {
+        label: `REFAZER ONDA ${again} · ◆${RETRY_COST}`,
+        action: note => {
+          if (this.diamonds < RETRY_COST) {
+            note.setText(
+              `Você precisa de ◆${RETRY_COST} e tem ◆${this.diamonds}. Consiga diamantes por PIX ou trocando moedas na LOJA.`,
+            );
+            return;
+          }
+
+          this.diamonds -= RETRY_COST;
+          this.saveDia();
+          this.cameras.main.fadeOut(400, 0, 0, 0);
+          this.time.delayedCall(420, () => this.scene.start('GameScene', {
+            heroKind: snap.heroKind,
+            save: snap,
+          }));
+        },
+      },
     );
   }
 
@@ -14022,6 +14133,18 @@ class TitleScene extends BaseScene {
       ).setDepth(12);
     }
 
+    // Modo paralelo: a cidade que junta moedas para o cofre.
+    this.makeButton(
+      130, sv ? 642 : 580, `CIDADE · JUNTAR MOEDAS  (cofre ${loadBank()})`, '#5a6a2a',
+      () => {
+        if (this.starting) return;
+
+        this.starting = true;
+        this.cameras.main.fadeOut(400, 0, 0, 0);
+        this.time.delayedCall(420, () => this.scene.start('CityScene'));
+      }, 14, 340, 48,
+    ).setDepth(12);
+
     const hint = this.add.text(300, 494, 'toque para começar', {
       fontFamily: 'Georgia, serif',
       fontSize: '13px',
@@ -14427,13 +14550,1242 @@ class ShopScene extends BaseScene {
   }
 }
 
+// ==================================================
+// CIDADE: modo paralelo para juntar moedas
+// ==================================================
+// A pessoa começa sozinha no mundo primitivo, constrói um centro que gera
+// novos moradores, junta a matéria-prima da era e evolui a sociedade.
+// Enquanto a sociedade está viva, ela rende moedas por minuto para o COFRE.
+// As moedas do cofre são sacadas na LOJA do tower defense.
+
+const BANK_KEY = 'towercraft_bank_v1';
+const CITY_KEY = 'towercraft_city_v1';
+
+function loadBank(): number {
+  try {
+    return Math.max(0, Math.floor(Number(localStorage.getItem(BANK_KEY)) || 0));
+  } catch {
+    return 0;
+  }
+}
+
+function addBank(n: number) {
+  try {
+    localStorage.setItem(BANK_KEY, String(loadBank() + Math.floor(n)));
+  } catch {
+    // ignora
+  }
+}
+
+function takeBank(): number {
+  const n = loadBank();
+
+  try {
+    localStorage.setItem(BANK_KEY, '0');
+  } catch {
+    return 0;
+  }
+
+  return n;
+}
+
+type CityKind = 'center' | 'house' | 'gather' | 'tower';
+
+type CityEra = {
+  name: string;
+  res: string;
+  resColor: number;
+  coin: number;
+  next: number;
+  needPop: number;
+  amb: Ambience;
+  ground: [number, number];
+  path: number;
+};
+
+const CITY_ERAS: CityEra[] = [
+  {
+    name: 'PRIMITIVO', res: 'MADEIRA', resColor: 0xc08a4a, coin: 2, next: 600, needPop: 15,
+    amb: 'primitive', ground: [0x3f6a32, 0x2a4a22], path: 0x7a5a36,
+  },
+  {
+    name: 'GRÉCIA', res: 'OURO', resColor: 0xffd84a, coin: 4, next: 4000, needPop: 30,
+    amb: 'greece', ground: [0x8a8a4a, 0x5f6a36], path: 0xd8c89a,
+  },
+  {
+    name: 'TECNOLÓGICO', res: 'METAL', resColor: 0xb8c4cc, coin: 7, next: 15000, needPop: 50,
+    amb: 'tech', ground: [0x1a3a48, 0x0c1e28], path: 0x3a5a6a,
+  },
+  {
+    name: 'MUNDO REAL', res: 'DINHEIRO', resColor: 0x6fdc7a, coin: 12, next: 0, needPop: 0,
+    amb: 'real', ground: [0x5a5e62, 0x3a3e42], path: 0x8a8e92,
+  },
+];
+
+const CITY_BUILD: Record<CityKind, { name: string; base: number; grow: number; max: number; hp: number }> = {
+  center: { name: 'CENTRO', base: 20, grow: 1, max: 1, hp: 300 },
+  house: { name: 'CASA', base: 25, grow: 1.25, max: 16, hp: 80 },
+  gather: { name: 'COLETA', base: 40, grow: 1.35, max: 6, hp: 100 },
+  tower: { name: 'TORRE', base: 60, grow: 1.4, max: 6, hp: 150 },
+};
+
+type CitySave = {
+  v: 1;
+  era: number;
+  res: number;
+  pop: number;
+  buildings: Array<{ kind: CityKind; slot: number; hp: number }>;
+  alive: boolean;
+  at: number;
+  attackIn: number;
+  attacks: number;
+  earned: number;
+};
+
+function readCity(): CitySave | null {
+  try {
+    const raw = localStorage.getItem(CITY_KEY);
+    if (!raw) return null;
+
+    const d = JSON.parse(raw) as CitySave;
+
+    return d && d.v === 1 && Array.isArray(d.buildings) ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCity(d: CitySave) {
+  try {
+    localStorage.setItem(CITY_KEY, JSON.stringify(d));
+  } catch {
+    // ignora
+  }
+}
+
+const CITY_CENTER = { x: 300, y: 500 };
+
+// Pontos de matéria-prima (árvores, minas de ouro, sucata, dinheiro).
+const CITY_NODES = [
+  { x: 70, y: 250 }, { x: 530, y: 250 },
+  { x: 60, y: 500 }, { x: 540, y: 500 },
+  { x: 70, y: 750 }, { x: 530, y: 750 },
+];
+
+function citySlots(kind: CityKind): Array<{ x: number; y: number }> {
+  if (kind === 'center') return [CITY_CENTER];
+
+  if (kind === 'gather') {
+    return CITY_NODES.map(n => ({ x: n.x + (n.x < 300 ? 62 : -62), y: n.y + 10 }));
+  }
+
+  if (kind === 'tower') {
+    return [
+      { x: 300, y: 235 }, { x: 300, y: 770 },
+      { x: 175, y: 330 }, { x: 425, y: 330 },
+      { x: 175, y: 680 }, { x: 425, y: 680 },
+    ];
+  }
+
+  const out: Array<{ x: number; y: number }> = [];
+
+  for (let i = 0; i < 8; i++) {
+    const a = (Math.PI * 2 * i) / 8 + Math.PI / 8;
+    out.push({ x: CITY_CENTER.x + Math.cos(a) * 95, y: CITY_CENTER.y + Math.sin(a) * 80 });
+  }
+
+  for (let i = 0; i < 8; i++) {
+    const a = (Math.PI * 2 * i) / 8;
+    out.push({ x: CITY_CENTER.x + Math.cos(a) * 165, y: CITY_CENTER.y + Math.sin(a) * 140 });
+  }
+
+  return out;
+}
+
+type CityBuilding = {
+  kind: CityKind;
+  slot: number;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  v: Phaser.GameObjects.Container;
+  cd: number;
+};
+
+type Walker = {
+  v: Phaser.GameObjects.Container;
+  load: Phaser.GameObjects.Arc;
+  x: number;
+  y: number;
+  node: number;
+  going: boolean;
+  speed: number;
+};
+
+type Raider = {
+  v: Phaser.GameObjects.Container;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  speed: number;
+  hitCd: number;
+  alive: boolean;
+};
+
+class CityScene extends BaseScene {
+  private era = 0;
+  private res = 0;
+  private pop = 1;
+  private alive = true;
+  private attackIn = 120000;
+  private attacks = 0;
+  private earned = 0;
+  private coinFrac = 0;
+  private growMs = 0;
+  private saveMs = 0;
+  private killMs = 0;
+  private alarmShown = false;
+  private wiping = false;
+
+  private buildings: CityBuilding[] = [];
+  private walkers: Walker[] = [];
+  private raiders: Raider[] = [];
+  private nodeObjs: Phaser.GameObjects.GameObject[] = [];
+
+  private ground!: Phaser.GameObjects.Graphics;
+  private fx!: Phaser.GameObjects.Graphics;
+  private hud!: Phaser.GameObjects.Text;
+  private hud2!: Phaser.GameObjects.Text;
+  private hud3!: Phaser.GameObjects.Text;
+  private alertText!: Phaser.GameObjects.Text;
+  private msgText!: Phaser.GameObjects.Text;
+  private buildBtns: Partial<Record<CityKind, Phaser.GameObjects.Container>> = {};
+  private eraBtn!: Phaser.GameObjects.Container;
+  private overlay: Phaser.GameObjects.GameObject[] = [];
+
+  constructor() {
+    super('CityScene');
+  }
+
+  init() {
+    this.gameOver = false;
+    this.wiping = false;
+    this.era = 0;
+    this.res = 0;
+    this.pop = 1;
+    this.alive = true;
+    this.attackIn = 120000;
+    this.attacks = 0;
+    this.earned = 0;
+    this.buildings = [];
+    this.walkers = [];
+    this.raiders = [];
+    this.nodeObjs = [];
+    this.overlay = [];
+    this.buildBtns = {};
+    this.coinFrac = 0;
+    this.growMs = 0;
+    this.saveMs = 0;
+    this.killMs = 0;
+    this.alarmShown = false;
+  }
+
+  // ---------- regras ----------
+
+  private eraInfo(): CityEra {
+    return CITY_ERAS[this.era];
+  }
+
+  private count(kind: CityKind): number {
+    return this.buildings.filter(b => b.kind === kind).length;
+  }
+
+  private hasCenter(): boolean {
+    return this.count('center') > 0;
+  }
+
+  private cap(): number {
+    return this.hasCenter() ? 5 + this.count('house') * 5 : 1;
+  }
+
+  private cost(kind: CityKind): number {
+    const c = CITY_BUILD[kind];
+
+    return Math.round(c.base * Math.pow(c.grow, this.count(kind)) * (1 + this.era));
+  }
+
+  // Matéria-prima por segundo.
+  private resRate(): number {
+    return this.pop * (1 + 0.25 * this.count('gather'));
+  }
+
+  // Moedas por minuto (só com o centro de pé).
+  private coinRate(): number {
+    return this.alive && this.hasCenter() ? this.pop * this.eraInfo().coin : 0;
+  }
+
+  // ---------- montar a tela ----------
+
+  create() {
+    SFX.ambient('primitive');
+    this.cameras.main.setBackgroundColor('#0b0f0c');
+
+    this.ground = this.add.graphics().setDepth(0);
+    this.fx = this.add.graphics().setDepth(30);
+
+    this.buildHud();
+
+    const sv = readCity();
+    let away = '';
+
+    if (sv) {
+      this.era = Phaser.Math.Clamp(sv.era, 0, CITY_ERAS.length - 1);
+      this.res = sv.res;
+      this.pop = Math.max(0, sv.pop);
+      this.alive = sv.alive;
+      this.attackIn = sv.attackIn > 0 ? sv.attackIn : 120000;
+      this.attacks = sv.attacks;
+      this.earned = sv.earned;
+
+      this.drawWorld();
+
+      for (const b of sv.buildings) this.placeBuilding(b.kind, b.slot, b.hp);
+
+      // Enquanto esteve fora: metade do rendimento, até 2 horas.
+      if (this.alive && this.hasCenter()) {
+        const mins = Math.min(120, Math.max(0, (Date.now() - sv.at) / 60000));
+        const coins = Math.floor(this.coinRate() * mins * 0.5);
+        const gained = Math.floor(this.resRate() * mins * 60 * 0.5);
+
+        if (coins > 0) {
+          addBank(coins);
+          this.earned += coins;
+          this.res += gained;
+          away = `Enquanto você esteve fora (${Math.round(mins)} min), a cidade rendeu +${coins} moedas e +${gained} de ${this.eraInfo().res.toLowerCase()}.`;
+        }
+      }
+    } else {
+      this.drawWorld();
+    }
+
+    SFX.ambient(this.eraInfo().amb);
+    this.syncWalkers();
+    this.refreshHud();
+
+    if (!this.alive) {
+      this.showCollapse();
+    } else if (away) {
+      this.message(away);
+    } else if (!this.hasCenter()) {
+      this.message('Você está sozinho. Junte madeira e construa o CENTRO: ele gera novos moradores.');
+    }
+
+    this.events.once('shutdown', () => this.saveCity());
+  }
+
+  private drawWorld() {
+    const e = this.eraInfo();
+    const g = this.ground;
+
+    g.clear();
+    this.fillVGradient(g, 0, 0, WIDTH, HEIGHT, e.ground[0], e.ground[1], 1, 8);
+
+    // Manchas do terreno
+    for (let i = 0; i < 70; i++) {
+      g.fillStyle(this.lerpColor(e.ground[0], 0x000000, 0.25), 0.35);
+      g.fillEllipse((i * 137) % WIDTH, 140 + ((i * 89) % 700), 30 + (i % 4) * 10, 10 + (i % 3) * 5);
+    }
+
+    // Caminhos até os pontos de matéria-prima
+    g.lineStyle(10, e.path, 0.55);
+
+    for (const n of CITY_NODES) g.lineBetween(CITY_CENTER.x, CITY_CENTER.y, n.x, n.y);
+
+    g.fillStyle(e.path, 0.5);
+    g.fillEllipse(CITY_CENTER.x, CITY_CENTER.y + 10, 150, 90);
+
+    for (const o of this.nodeObjs) this.killVisual(o);
+    this.nodeObjs = [];
+
+    CITY_NODES.forEach(n => this.nodeObjs.push(this.drawNode(n.x, n.y)));
+  }
+
+  // Matéria-prima de cada era.
+  private drawNode(x: number, y: number): Phaser.GameObjects.Container {
+    const c = this.add.container(x, y).setDepth(2);
+    const g = this.add.graphics();
+
+    if (this.era === 0) {
+      for (const [dx, dy, r] of [[-14, 6, 15], [12, 2, 17], [0, -14, 16]]) {
+        g.fillStyle(0x5a3a1a, 1);
+        g.fillRect(dx - 3, dy, 6, 16);
+        g.fillStyle(0x2f7a2a, 1);
+        g.fillCircle(dx, dy - 4, r);
+        g.fillStyle(0x4aa040, 1);
+        g.fillCircle(dx - 4, dy - 8, r * 0.5);
+      }
+    } else if (this.era === 1) {
+      g.fillStyle(0x5a5048, 1);
+      g.fillTriangle(-30, 18, 30, 18, 0, -22);
+      g.fillStyle(0x1a1410, 1);
+      g.fillEllipse(0, 12, 22, 16);
+
+      for (const [dx, dy] of [[-12, 2], [10, -4], [2, 8], [-4, -10]]) {
+        g.fillStyle(0xffd84a, 1);
+        g.fillCircle(dx, dy, 4);
+        g.fillStyle(0xfff3b0, 1);
+        g.fillCircle(dx - 1, dy - 1, 1.5);
+      }
+    } else if (this.era === 2) {
+      for (const [dx, dy, w] of [[-14, 8, 24], [10, 4, 20], [0, -8, 26]]) {
+        g.fillStyle(0x8a96a0, 1);
+        g.fillRect(dx - w / 2, dy - 6, w, 12);
+        g.lineStyle(1, 0x3a4650, 1);
+        g.strokeRect(dx - w / 2, dy - 6, w, 12);
+      }
+
+      g.fillStyle(0x3cf0ff, 0.8);
+      g.fillCircle(14, -14, 3);
+    } else {
+      g.fillStyle(0x2a2e32, 1);
+      g.fillRect(-20, -22, 40, 40);
+      g.fillStyle(0x6fdc7a, 1);
+      g.fillRect(-14, -14, 28, 10);
+      g.fillStyle(0x1a5a22, 1);
+      g.fillRect(-14, 2, 28, 8);
+
+      for (const [dx, dy] of [[-26, 20], [24, 18]]) {
+        g.fillStyle(0x4aa04a, 1);
+        g.fillRect(dx - 8, dy - 4, 16, 8);
+        g.lineStyle(1, 0x1a5a22, 1);
+        g.strokeRect(dx - 8, dy - 4, 16, 8);
+      }
+    }
+
+    c.add(g);
+    return c;
+  }
+
+  // Desenho das construções conforme a era.
+  private drawBuilding(kind: CityKind, x: number, y: number): Phaser.GameObjects.Container {
+    const c = this.add.container(x, y).setDepth(5 + y / 1000);
+    const g = this.add.graphics();
+    const era = this.era;
+
+    g.fillStyle(0x000000, 0.3);
+    g.fillEllipse(2, 14, kind === 'center' ? 90 : 46, kind === 'center' ? 26 : 14);
+
+    if (kind === 'center') {
+      if (era === 0) {
+        g.fillStyle(0x6b4a2a, 1);
+        g.fillRect(-34, -14, 68, 28);
+        g.fillStyle(0xa0703a, 1);
+        g.fillTriangle(-44, -12, 44, -12, 0, -52);
+        g.fillStyle(0x2a1a0a, 1);
+        g.fillRect(-8, -2, 16, 16);
+        g.fillStyle(0xff8a2a, 1);
+        g.fillTriangle(30, 14, 42, 14, 36, 0);
+      } else if (era === 1) {
+        g.fillStyle(0xe8e0c8, 1);
+        g.fillRect(-42, -6, 84, 20);
+        for (let i = 0; i < 6; i++) g.fillRect(-38 + i * 15, -40, 7, 36);
+        g.fillTriangle(-48, -40, 48, -40, 0, -64);
+        g.fillStyle(0xc9a24d, 1);
+        g.fillRect(-48, -44, 96, 5);
+      } else if (era === 2) {
+        g.fillStyle(0x4a5a66, 1);
+        g.fillRect(-44, -30, 88, 44);
+        g.fillStyle(0x2a3640, 1);
+        g.fillRect(22, -64, 14, 36);
+        g.fillStyle(0x3cf0ff, 1);
+        for (let i = 0; i < 5; i++) g.fillRect(-38 + i * 16, -20, 10, 6);
+        g.fillStyle(0xff4ad8, 1);
+        g.fillCircle(29, -66, 4);
+      } else {
+        g.fillStyle(0x2a4a6a, 1);
+        g.fillRect(-28, -96, 56, 110);
+        g.fillStyle(0x9fd8ff, 0.9);
+        for (let r = 0; r < 9; r++) {
+          for (let k = 0; k < 4; k++) g.fillRect(-22 + k * 12, -88 + r * 11, 7, 6);
+        }
+        g.fillStyle(0x1a2a3a, 1);
+        g.fillRect(-10, 0, 20, 14);
+      }
+    } else if (kind === 'house') {
+      if (era === 0) {
+        g.fillStyle(0x8a5a2a, 1);
+        g.fillTriangle(-18, 12, 18, 12, 0, -18);
+        g.fillStyle(0x2a1a0a, 1);
+        g.fillTriangle(-5, 12, 5, 12, 0, 0);
+      } else if (era === 1) {
+        g.fillStyle(0xf2ecd8, 1);
+        g.fillRect(-16, -8, 32, 20);
+        g.fillStyle(0xb8502a, 1);
+        g.fillTriangle(-20, -8, 20, -8, 0, -22);
+        g.fillStyle(0x3a2a1a, 1);
+        g.fillRect(-4, 2, 8, 10);
+      } else if (era === 2) {
+        g.fillStyle(0x9aa8b4, 1);
+        g.fillEllipse(0, 2, 36, 28);
+        g.fillStyle(0x3cf0ff, 0.9);
+        g.fillEllipse(0, -2, 16, 8);
+      } else {
+        g.fillStyle(0x8a6a5a, 1);
+        g.fillRect(-14, -30, 28, 42);
+        g.fillStyle(0xfff0a0, 0.9);
+        for (let r = 0; r < 3; r++) for (let k = 0; k < 2; k++) g.fillRect(-9 + k * 12, -24 + r * 11, 6, 6);
+      }
+    } else if (kind === 'gather') {
+      if (era === 0) {
+        g.fillStyle(0x7a4a22, 1);
+        for (let i = 0; i < 3; i++) g.fillRect(-18, 4 - i * 8, 36, 7);
+        g.fillStyle(0xc08a4a, 1);
+        for (let i = 0; i < 3; i++) g.fillCircle(18, 7 - i * 8, 3.5);
+      } else if (era === 1) {
+        g.fillStyle(0x6a5a48, 1);
+        g.fillRect(-18, -12, 36, 24);
+        g.fillStyle(0x1a1410, 1);
+        g.fillEllipse(0, 6, 16, 14);
+        g.fillStyle(0xffd84a, 1);
+        g.fillRect(-20, -16, 40, 5);
+      } else if (era === 2) {
+        g.fillStyle(0x5a6670, 1);
+        g.fillRect(-20, -14, 40, 28);
+        g.fillStyle(0xffb347, 1);
+        g.fillRect(-20, -18, 40, 5);
+        g.fillStyle(0x3cf0ff, 1);
+        g.fillCircle(0, 0, 6);
+      } else {
+        g.fillStyle(0xe8e8e0, 1);
+        g.fillRect(-20, -16, 40, 30);
+        for (let i = 0; i < 4; i++) g.fillRect(-18 + i * 11, -26, 6, 12);
+        g.fillStyle(0x2a8a3a, 1);
+        g.fillCircle(0, 0, 8);
+        g.fillStyle(0xffffff, 1);
+        g.fillRect(-1, -6, 2, 12);
+      }
+    } else {
+      if (era === 0) {
+        g.fillStyle(0x6b4a2a, 1);
+        g.fillRect(-4, -36, 8, 48);
+        g.fillRect(-14, -40, 28, 8);
+        g.fillStyle(0xa0703a, 1);
+        g.fillTriangle(-16, -40, 16, -40, 0, -54);
+      } else if (era === 1) {
+        g.fillStyle(0xbab0a0, 1);
+        g.fillRect(-10, -40, 20, 52);
+        g.fillStyle(0x8a8070, 1);
+        for (let i = 0; i < 3; i++) g.fillRect(-12 + i * 9, -46, 6, 6);
+      } else if (era === 2) {
+        g.fillStyle(0x3a4650, 1);
+        g.fillRect(-12, -18, 24, 30);
+        g.fillStyle(0x6a7a86, 1);
+        g.fillCircle(0, -22, 10);
+        g.lineStyle(4, 0x2a3640, 1);
+        g.lineBetween(0, -22, 18, -30);
+      } else {
+        g.fillStyle(0x4a4e52, 1);
+        g.fillRect(-8, -44, 16, 56);
+        g.fillStyle(0xff3a2a, 1);
+        g.fillCircle(0, -48, 4);
+        g.lineStyle(2, 0x9aa0a6, 1);
+        g.lineBetween(0, -52, 0, -64);
+      }
+    }
+
+    c.add(g);
+    return c;
+  }
+
+  private placeBuilding(kind: CityKind, slot: number, hp?: number) {
+    const slots = citySlots(kind);
+    const p = slots[slot];
+
+    if (!p) return;
+
+    const maxHp = Math.round(CITY_BUILD[kind].hp * (1 + this.era * 0.75));
+
+    this.buildings.push({
+      kind,
+      slot,
+      x: p.x,
+      y: p.y,
+      hp: hp === undefined ? maxHp : Math.min(maxHp, hp),
+      maxHp,
+      v: this.drawBuilding(kind, p.x, p.y),
+      cd: 0,
+    });
+  }
+
+  private redrawBuildings() {
+    const list = this.buildings.map(b => ({ kind: b.kind, slot: b.slot }));
+
+    for (const b of this.buildings) this.killVisual(b.v);
+    this.buildings = [];
+
+    for (const b of list) this.placeBuilding(b.kind, b.slot);
+  }
+
+  // ---------- painel ----------
+
+  private buildHud() {
+    const top = this.add.graphics().setDepth(40);
+
+    this.fillVGradient(top, 0, 0, WIDTH, 128, 0x15191e, 0x07090b, 0.96, 3);
+    top.fillStyle(GOLD_DARK, 1);
+    top.fillRect(0, 126, WIDTH, 3);
+
+    const bot = this.add.graphics().setDepth(40);
+
+    this.fillVGradient(bot, 0, 858, WIDTH, 142, 0x15191e, 0x07090b, 0.97, 3);
+    bot.fillStyle(GOLD_DARK, 1);
+    bot.fillRect(0, 856, WIDTH, 3);
+
+    const st = (size: number, color: string): Phaser.Types.GameObjects.Text.TextStyle => ({
+      fontFamily: 'Georgia, serif',
+      fontSize: `${size}px`,
+      color,
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 3,
+    });
+
+    this.hud = this.add.text(14, 10, '', st(20, '#f0d58a')).setDepth(41);
+    this.hud2 = this.add.text(14, 42, '', st(14, '#efe6cc')).setDepth(41).setLineSpacing(6);
+    this.hud3 = this.add.text(586, 42, '', { ...st(14, '#ffe08a'), align: 'right' })
+      .setOrigin(1, 0).setDepth(41).setLineSpacing(6);
+
+    this.alertText = this.add.text(300, 150, '', st(18, '#ff8a7a'))
+      .setOrigin(0.5).setDepth(42);
+
+    this.msgText = this.add.text(300, 832, '', {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: '12px',
+      color: '#fff1cc',
+      backgroundColor: '#0b0d10d8',
+      padding: { x: 8, y: 5 },
+      align: 'center',
+      wordWrap: { width: 560 },
+    }).setOrigin(0.5, 1).setDepth(42);
+
+    const kinds: CityKind[] = ['center', 'house', 'gather', 'tower'];
+
+    kinds.forEach((k, i) => {
+      this.buildBtns[k] = this.makeButton(
+        10 + i * 147, 868, '', '#5a4a2a', () => this.build(k), 11, 140, 44,
+      ).setDepth(43);
+    });
+
+    this.eraBtn = this.makeButton(
+      10, 920, '', '#2d6a8a', () => this.evolve(), 12, 420, 44,
+    ).setDepth(43);
+
+    this.makeButton(
+      440, 920, 'VOLTAR', '#3a4046', () => this.leave(), 13, 150, 44,
+    ).setDepth(43);
+
+    this.add.text(300, 980, 'Toque nos invasores para atacá-los. As torres defendem sozinhas.', {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: '10px',
+      color: '#b9b09a',
+    }).setOrigin(0.5).setDepth(43);
+  }
+
+  private refreshHud() {
+    const e = this.eraInfo();
+    const secs = Math.ceil(this.attackIn / 1000);
+    const mm = Math.floor(secs / 60);
+    const ss = String(secs % 60).padStart(2, '0');
+
+    this.hud.setText(`CIDADE · ERA ${e.name}`);
+    this.hud2.setText(
+      `${e.res}: ${Math.floor(this.res)}  (+${this.resRate().toFixed(1)}/s)\n` +
+      `PESSOAS: ${this.pop} / ${this.cap()}\n` +
+      (this.raiders.some(r => r.alive) ? 'SOB ATAQUE!' : `PRÓXIMO ATAQUE: ${mm}:${ss}`),
+    );
+    this.hud3.setText(
+      `+${this.coinRate()} moedas/min\n` +
+      `COFRE: ${loadBank()} moedas\n` +
+      `TOTAL GANHO: ${this.earned}`,
+    );
+
+    const kinds: CityKind[] = ['center', 'house', 'gather', 'tower'];
+
+    for (const k of kinds) {
+      const btn = this.buildBtns[k];
+      if (!btn) continue;
+
+      const full = this.count(k) >= CITY_BUILD[k].max;
+      const label = full
+        ? `${CITY_BUILD[k].name} ✓`
+        : `${CITY_BUILD[k].name} · ${this.cost(k)}`;
+
+      this.setButtonLabel(btn, label);
+      btn.setAlpha(full || (k !== 'center' && !this.hasCenter()) ? 0.45 : this.res >= this.cost(k) ? 1 : 0.7);
+    }
+
+    if (e.next > 0) {
+      const next = CITY_ERAS[this.era + 1];
+
+      this.setButtonLabel(
+        this.eraBtn,
+        `EVOLUIR PARA ${next.name} · ${e.next} ${e.res.toLowerCase()} · ${e.needPop} pessoas`,
+      );
+      this.eraBtn.setAlpha(this.res >= e.next && this.pop >= e.needPop ? 1 : 0.6);
+    } else {
+      this.setButtonLabel(this.eraBtn, 'ERA MÁXIMA: MUNDO REAL');
+      this.eraBtn.setAlpha(0.6);
+    }
+  }
+
+  private message(text: string) {
+    this.msgText.setText(text).setAlpha(1);
+    this.tweens.killTweensOf(this.msgText);
+    this.tweens.add({ targets: this.msgText, alpha: 0, delay: 5000, duration: 800 });
+  }
+
+  // ---------- ações ----------
+
+  private build(kind: CityKind) {
+    if (!this.alive || this.overlay.length) return;
+
+    const info = CITY_BUILD[kind];
+
+    if (kind !== 'center' && !this.hasCenter()) {
+      this.message('Construa primeiro o CENTRO.');
+      return;
+    }
+
+    if (this.count(kind) >= info.max) {
+      this.message(`Limite de ${info.name.toLowerCase()} atingido.`);
+      return;
+    }
+
+    const cost = this.cost(kind);
+
+    if (this.res < cost) {
+      this.message(`Faltam ${Math.ceil(cost - this.res)} de ${this.eraInfo().res.toLowerCase()} para ${info.name}.`);
+      return;
+    }
+
+    const used = new Set(this.buildings.filter(b => b.kind === kind).map(b => b.slot));
+    const slot = citySlots(kind).findIndex((_, i) => !used.has(i));
+
+    if (slot < 0) return;
+
+    this.res -= cost;
+    this.placeBuilding(kind, slot);
+    SFX.play('build');
+
+    const b = this.buildings[this.buildings.length - 1];
+    b.v.setScale(0.2);
+    this.tweens.add({ targets: b.v, scale: 1, duration: 300, ease: 'Back.easeOut' });
+
+    const tips: Record<CityKind, string> = {
+      center: 'Centro construído! Ele gera um novo morador a cada 8 s (até o limite de casas).',
+      house: 'Casa construída: +5 de espaço para moradores.',
+      gather: `Coleta construída: todos juntam ${this.eraInfo().res.toLowerCase()} 25% mais rápido.`,
+      tower: 'Torre construída: ela atira nos invasores.',
+    };
+
+    this.message(tips[kind]);
+    this.refreshHud();
+    this.saveCity();
+  }
+
+  private evolve() {
+    if (!this.alive || this.overlay.length) return;
+
+    const e = this.eraInfo();
+
+    if (e.next <= 0) return;
+
+    if (this.pop < e.needPop) {
+      this.message(`Para evoluir são precisas ${e.needPop} pessoas (você tem ${this.pop}).`);
+      return;
+    }
+
+    if (this.res < e.next) {
+      this.message(`Faltam ${Math.ceil(e.next - this.res)} de ${e.res.toLowerCase()} para evoluir.`);
+      return;
+    }
+
+    this.era++;
+    this.res = 0;
+
+    const n = this.eraInfo();
+
+    this.cameras.main.flash(500, 255, 240, 200);
+    SFX.play('levelup');
+    SFX.ambient(n.amb);
+
+    this.drawWorld();
+    this.redrawBuildings();
+
+    for (const w of this.walkers) this.killVisual(w.v);
+    this.walkers = [];
+    this.syncWalkers();
+
+    this.message(
+      `Sua sociedade chegou à era ${n.name}! Agora se junta ${n.res.toLowerCase()}, e cada pessoa rende ${n.coin} moedas por minuto.`,
+    );
+    this.refreshHud();
+    this.saveCity();
+  }
+
+  private leave() {
+    this.saveCity();
+    this.cameras.main.fadeOut(300, 0, 0, 0);
+    this.time.delayedCall(320, () => this.scene.start('TitleScene'));
+  }
+
+  private saveCity() {
+    if (this.wiping) return;
+
+    writeCity({
+      v: 1,
+      era: this.era,
+      res: this.res,
+      pop: this.pop,
+      buildings: this.buildings.map(b => ({ kind: b.kind, slot: b.slot, hp: b.hp })),
+      alive: this.alive,
+      at: Date.now(),
+      attackIn: this.attackIn,
+      attacks: this.attacks,
+      earned: this.earned,
+    });
+  }
+
+  // ---------- moradores ----------
+
+  private makePerson(x: number, y: number): Walker {
+    const v = this.add.container(x, y).setDepth(8);
+    const skin = [0xe0b090, 0xc08060, 0x8a5a3a][Math.floor(Math.random() * 3)];
+    const cloth = [0x8a5a2a, 0xe8e0c8, 0x5a6a7a, 0x3a5a8a][this.era];
+    const load = this.add.circle(6, -4, 3, this.eraInfo().resColor).setVisible(false);
+
+    v.add([
+      this.add.rectangle(0, 2, 6, 9, cloth).setStrokeStyle(1, 0x000000, 0.6),
+      this.add.circle(0, -6, 3.5, skin).setStrokeStyle(1, 0x000000, 0.6),
+      load,
+    ]);
+
+    return {
+      v, load, x, y,
+      node: Math.floor(Math.random() * CITY_NODES.length),
+      going: true,
+      speed: 34 + Math.random() * 16,
+    };
+  }
+
+  // Mostra até 40 moradores andando (os outros estão "trabalhando").
+  private syncWalkers() {
+    const want = Math.min(40, this.pop);
+
+    while (this.walkers.length < want) {
+      const src = this.hasCenter() ? CITY_CENTER : { x: 300, y: 560 };
+      this.walkers.push(this.makePerson(src.x + Phaser.Math.Between(-20, 20), src.y + 20));
+    }
+
+    while (this.walkers.length > want) {
+      const w = this.walkers.pop() as Walker;
+      this.killVisual(w.v);
+    }
+  }
+
+  private moveWalkers(dt: number) {
+    const home = this.hasCenter() ? CITY_CENTER : { x: 300, y: 560 };
+    const scared = this.raiders.some(r => r.alive);
+
+    for (const w of this.walkers) {
+      const n = CITY_NODES[w.node];
+      const tx = scared ? home.x : w.going ? n.x : home.x;
+      const ty = scared ? home.y + 18 : w.going ? n.y + 12 : home.y + 18;
+      const dx = tx - w.x;
+      const dy = ty - w.y;
+      const d = Math.hypot(dx, dy);
+      const step = w.speed * (scared ? 1.8 : 1) * dt / 1000;
+
+      if (d <= step) {
+        if (!scared) {
+          w.going = !w.going;
+          w.load.setVisible(!w.going);
+          if (w.going) w.node = Math.floor(Math.random() * CITY_NODES.length);
+        }
+      } else {
+        w.x += dx / d * step;
+        w.y += dy / d * step;
+      }
+
+      w.v.setPosition(w.x, w.y + Math.sin(this.time.now / 90 + w.speed) * 0.8);
+      w.v.setScale(dx < 0 ? -1 : 1, 1);
+    }
+  }
+
+  // ---------- ataques ----------
+
+  private startAttack() {
+    this.attacks++;
+
+    const n = Math.min(30, 1 + Math.floor(this.pop / 6) + this.attacks);
+    const hp = Math.round(8 * (1 + this.era * 1.5) * (1 + this.attacks * 0.12));
+
+    for (let i = 0; i < n; i++) {
+      const side = i % 3;
+      const x = side === 0 ? 14 : side === 1 ? WIDTH - 14 : Phaser.Math.Between(60, 540);
+      const y = side === 2 ? 140 : Phaser.Math.Between(180, 820);
+
+      this.time.delayedCall(i * 450, () => {
+        if (this.alive) this.spawnRaider(x, y, hp);
+      });
+    }
+
+    SFX.play('boss');
+    this.cameras.main.shake(250, 0.006);
+    this.alertText.setText(`ATAQUE! ${n} INVASORES`).setAlpha(1);
+    this.tweens.add({ targets: this.alertText, alpha: 0, delay: 2500, duration: 600 });
+  }
+
+  private spawnRaider(x: number, y: number, hp: number) {
+    const v = this.add.container(x, y).setDepth(9);
+    const col = [0xb8402a, 0x8a2a2a, 0x5a6a7a, 0x2a2a2a][this.era];
+    const g = this.add.graphics();
+
+    g.fillStyle(0x000000, 0.3);
+    g.fillEllipse(0, 9, 18, 6);
+    g.fillStyle(col, 1);
+    g.fillRect(-5, -4, 10, 12);
+    g.fillStyle(this.era === 2 ? 0x9aa8b4 : 0xc08060, 1);
+    g.fillCircle(0, -9, 5);
+    g.fillStyle(0xff3a2a, 1);
+    g.fillCircle(2, -10, 1.4);
+    g.lineStyle(2, this.era >= 2 ? 0x3a3e42 : 0x6b4a2a, 1);
+    g.lineBetween(6, -2, 13, -12);
+
+    const bar = this.add.rectangle(0, -18, 18, 3, 0xff4a3a).setOrigin(0.5);
+
+    v.add([g, bar]);
+    v.setData('bar', bar);
+    v.setSize(30, 34);
+    v.setInteractive({ useHandCursor: true });
+
+    const r: Raider = {
+      v, x, y, hp, maxHp: hp,
+      speed: 30 + Math.random() * 14 + this.era * 4,
+      hitCd: 0,
+      alive: true,
+    };
+
+    // Toque do jogador: golpe no invasor.
+    v.on('pointerdown', () => {
+      if (!r.alive || this.overlay.length) return;
+      this.hurtRaider(r, 4 * (1 + this.era));
+      SFX.play('slash');
+    });
+
+    this.raiders.push(r);
+  }
+
+  private hurtRaider(r: Raider, dmg: number) {
+    r.hp -= dmg;
+
+    const bar = r.v.getData('bar') as Phaser.GameObjects.Rectangle;
+    bar.setScale(Math.max(0, r.hp / r.maxHp), 1);
+
+    this.tweens.add({ targets: r.v, alpha: 0.4, duration: 60, yoyo: true });
+
+    if (r.hp > 0) return;
+
+    r.alive = false;
+    SFX.play('kill');
+    this.floatText(r.x, r.y - 20, 'X', '#ff8a7a', 14);
+    this.killVisual(r.v);
+  }
+
+  private nearestBuilding(x: number, y: number): CityBuilding | null {
+    let best: CityBuilding | null = null;
+    let bd = Infinity;
+
+    for (const b of this.buildings) {
+      const d = Phaser.Math.Distance.Between(x, y, b.x, b.y);
+
+      if (d < bd) {
+        bd = d;
+        best = b;
+      }
+    }
+
+    return best;
+  }
+
+  private updateRaiders(dt: number) {
+    const now = this.time.now;
+
+    for (const r of this.raiders) {
+      if (!r.alive) continue;
+
+      const target = this.nearestBuilding(r.x, r.y);
+      const tx = target ? target.x : CITY_CENTER.x;
+      const ty = target ? target.y : CITY_CENTER.y;
+      const d = Phaser.Math.Distance.Between(r.x, r.y, tx, ty);
+      const reach = target?.kind === 'center' ? 46 : 26;
+
+      if (d > reach) {
+        const step = r.speed * dt / 1000;
+        r.x += (tx - r.x) / d * step;
+        r.y += (ty - r.y) / d * step;
+        r.v.setPosition(r.x, r.y + Math.sin(now / 80 + r.speed) * 1.2);
+        r.v.setScale(tx < r.x ? -1 : 1, 1);
+        continue;
+      }
+
+      // Atacando: derruba construções e assusta/mata moradores.
+      r.hitCd -= dt;
+
+      if (r.hitCd <= 0 && target) {
+        r.hitCd = 700;
+        target.hp -= 6 * (1 + this.era * 0.75);
+
+        this.fx.fillStyle(0xff3a2a, 0.6);
+        this.fx.fillCircle(target.x, target.y, 10);
+        this.tweens.add({ targets: r.v, x: r.x + (tx - r.x) * 0.2, duration: 90, yoyo: true });
+
+        if (target.hp <= 0) this.destroyBuilding(target);
+      }
+    }
+
+    this.raiders = this.raiders.filter(r => r.alive);
+
+    // Invasores no centro matam moradores (1 a cada 5 s por invasor).
+    const atCenter = this.raiders.filter(r =>
+      Phaser.Math.Distance.Between(r.x, r.y, CITY_CENTER.x, CITY_CENTER.y) < 70).length;
+
+    if (atCenter > 0) {
+      this.killMs += dt * atCenter;
+
+      while (this.killMs >= 5000 && this.pop > 0) {
+        this.killMs -= 5000;
+        this.pop--;
+        SFX.play('hurt');
+        this.floatText(CITY_CENTER.x + Phaser.Math.Between(-30, 30), CITY_CENTER.y - 40, '-1 pessoa', '#ff8a7a', 12);
+      }
+    }
+  }
+
+  private destroyBuilding(b: CityBuilding) {
+    this.buildings = this.buildings.filter(x => x !== b);
+    this.cameras.main.shake(180, 0.006);
+    SFX.play('explosion');
+    this.floatText(b.x, b.y - 30, `${CITY_BUILD[b.kind].name} DESTRUÍDA!`, '#ff8a7a', 13);
+
+    const v = b.v;
+    this.tweens.add({ targets: v, alpha: 0, scaleY: 0.2, duration: 400, onComplete: () => this.killVisual(v) });
+
+    // Sem casa para todos: quem sobra vai embora.
+    if (this.pop > this.cap()) this.pop = this.cap();
+  }
+
+  private updateTowers(dt: number) {
+    for (const b of this.buildings) {
+      if (b.kind !== 'tower') continue;
+
+      b.cd -= dt;
+      if (b.cd > 0) continue;
+
+      let target: Raider | null = null;
+      let bd = 180;
+
+      for (const r of this.raiders) {
+        if (!r.alive) continue;
+
+        const d = Phaser.Math.Distance.Between(b.x, b.y - 30, r.x, r.y);
+
+        if (d < bd) {
+          bd = d;
+          target = r;
+        }
+      }
+
+      if (!target) continue;
+
+      b.cd = 800;
+
+      const shot = this.add.circle(b.x, b.y - 36, 4, this.era >= 2 ? 0x3cf0ff : 0xffe08a).setDepth(20);
+      const t = target;
+
+      this.tweens.add({
+        targets: shot,
+        x: t.x,
+        y: t.y - 4,
+        duration: 160,
+        onComplete: () => {
+          shot.destroy();
+          if (t.alive) this.hurtRaider(t, 4 * (1 + this.era));
+        },
+      });
+    }
+  }
+
+  // ---------- fim da sociedade ----------
+
+  private showCollapse() {
+    this.alive = false;
+
+    for (const r of this.raiders) if (r.alive) this.killVisual(r.v);
+    this.raiders = [];
+
+    const keep = <T extends Phaser.GameObjects.GameObject>(o: T): T => {
+      this.overlay.push(o);
+      return o;
+    };
+
+    keep(this.add.rectangle(300, 500, WIDTH, HEIGHT, 0x000000, 0.7).setDepth(60).setInteractive());
+
+    const panel = keep(this.add.graphics().setDepth(61));
+    this.drawPanelFrame(panel, 50, 340, 500, 300, 10);
+
+    keep(this.add.text(300, 380, 'A SOCIEDADE CAIU', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '30px',
+      color: '#e8574c',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 5,
+    }).setOrigin(0.5).setDepth(62));
+
+    keep(this.add.text(300, 470,
+      `Os invasores destruíram a cidade na era ${this.eraInfo().name}.\n\n` +
+      `As moedas já ganhas continuam no COFRE: ${loadBank()}.\n` +
+      `Total que esta cidade rendeu: ${this.earned} moedas.`, {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '14px',
+        color: '#efe6cc',
+        align: 'center',
+        wordWrap: { width: 440 },
+        lineSpacing: 4,
+      }).setOrigin(0.5).setDepth(62));
+
+    keep(this.makeButton(80, 570, 'RECOMEÇAR', '#2f6a45', () => this.restartCity(), 14, 210, 44, true).setDepth(63));
+    keep(this.makeButton(310, 570, 'VOLTAR', '#3a4046', () => this.leave(), 14, 210, 44, true).setDepth(63));
+
+    SFX.play('defeat');
+    this.saveCity();
+  }
+
+  private restartCity() {
+    this.wiping = true;
+
+    try {
+      localStorage.removeItem(CITY_KEY);
+    } catch {
+      // ignora
+    }
+
+    this.scene.restart();
+  }
+
+  // ---------- laço principal ----------
+
+  update(_t: number, dt: number) {
+    if (this.overlay.length) return;
+
+    this.fx.clear();
+
+    // Coleta
+    this.res += this.resRate() * dt / 1000;
+
+    // Crescimento: o centro gera um morador a cada 8 s.
+    if (this.hasCenter() && this.pop < this.cap() && !this.raiders.length) {
+      this.growMs += dt;
+
+      if (this.growMs >= 8000) {
+        this.growMs = 0;
+        this.pop++;
+        this.floatText(CITY_CENTER.x, CITY_CENTER.y - 60, '+1 pessoa', '#9fe3b0', 12);
+      }
+    }
+
+    // Moedas para o cofre
+    this.coinFrac += this.coinRate() * dt / 60000;
+
+    if (this.coinFrac >= 1) {
+      const whole = Math.floor(this.coinFrac);
+      this.coinFrac -= whole;
+      addBank(whole);
+      this.earned += whole;
+    }
+
+    // Ataques de tempo em tempo (só depois de ter o centro).
+    if (this.hasCenter() && !this.raiders.length) {
+      this.attackIn -= dt;
+
+      if (this.attackIn <= 10000 && !this.alarmShown) {
+        this.alarmShown = true;
+        this.alertText.setText('INVASORES CHEGANDO EM 10 s!').setAlpha(1);
+        this.tweens.add({ targets: this.alertText, alpha: 0.2, duration: 400, yoyo: true, repeat: 8 });
+        SFX.play('wave');
+      }
+
+      if (this.attackIn <= 0) {
+        this.attackIn = 150000;
+        this.alarmShown = false;
+        this.startAttack();
+      }
+    }
+
+    // Construções se recuperam quando não há invasores.
+    if (!this.raiders.length) {
+      for (const b of this.buildings) b.hp = Math.min(b.maxHp, b.hp + b.maxHp * 0.02 * dt / 1000);
+    }
+
+    this.updateRaiders(dt);
+    this.updateTowers(dt);
+    this.syncWalkers();
+    this.moveWalkers(dt);
+    this.drawBuildingBars();
+
+    if (this.alive && (this.pop <= 0 || (this.attacks > 0 && !this.hasCenter()))) {
+      this.showCollapse();
+      return;
+    }
+
+    this.saveMs += dt;
+
+    if (this.saveMs > 5000) {
+      this.saveMs = 0;
+      this.saveCity();
+    }
+
+    this.refreshHud();
+  }
+
+  private drawBuildingBars() {
+    const g = this.fx;
+
+    for (const b of this.buildings) {
+      if (b.hp >= b.maxHp) continue;
+
+      const w = b.kind === 'center' ? 70 : 34;
+      const y = b.y + (b.kind === 'center' ? 24 : 18);
+      const r = Math.max(0, b.hp / b.maxHp);
+
+      g.fillStyle(0x000000, 0.8);
+      g.fillRect(b.x - w / 2 - 1, y - 1, w + 2, 6);
+      g.fillStyle(r > 0.5 ? 0x4cd964 : r > 0.25 ? 0xf2c94c : 0xe8574c, 1);
+      g.fillRect(b.x - w / 2, y, w * r, 4);
+    }
+  }
+}
+
 new Phaser.Game({
   type: Phaser.AUTO,
   width: WIDTH,
   height: HEIGHT,
   parent: 'app',
   backgroundColor: '#080c09',
-  scene: [IntroScene, TitleScene, ShopScene, GameScene, EndingScene],
+  scene: [IntroScene, TitleScene, ShopScene, GameScene, EndingScene, CityScene],
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
