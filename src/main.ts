@@ -10090,6 +10090,8 @@ class GameScene extends BaseScene {
       g.fillCircle(fx + side * ph * 14, fy - jet + ph * (jet + 2), 1.8);
     }
 
+    this.fountainLabel?.setColor(healing ? '#7dff9a' : '#bff7ff');
+
     if (!healing) return;
 
     this.heroHp = Math.min(this.heroMaxHp, this.heroHp + this.heroMaxHp * 0.12 * delta / 1000);
@@ -10698,39 +10700,6 @@ class GameScene extends BaseScene {
     return on
       ? 'PODER NV.5: gelo em área, 50% mais lentos por 2 s; deixa o chão congelado.'
       : 'Nv.5 libera: lentidão em área.';
-  }
-
-  private fireballBlast(x: number, y: number, raw: number, main: Enemy) {
-    const now = this.time.now;
-
-    for (const e of this.enemies) {
-      if (!e.alive) continue;
-
-      if (Phaser.Math.Distance.Between(e.body.x, e.body.y, x, y) > 58) continue;
-
-      if (e !== main) this.damageEnemy(e, raw * e.resist.basic);
-
-      // Pegam fogo por cerca de 2 segundos.
-      if (e.alive) {
-        e.burnUntil = now + 2000;
-        e.burnDps = Math.max(e.burnDps, raw * 0.35 * e.resist.basic);
-      }
-    }
-
-    this.addZone('fire', x, y, 48, now, raw * 0.35);
-
-    const blast = this.add.circle(x, y, 12, 0xff8a2a, 0.55)
-      .setStrokeStyle(3, 0xffd16b, 0.9)
-      .setBlendMode(Phaser.BlendModes.ADD)
-      .setDepth(13);
-
-    this.tweens.add({
-      targets: blast,
-      scale: 4.8,
-      alpha: 0,
-      duration: 280,
-      onComplete: () => blast.destroy(),
-    });
   }
 
   private slowArea(x: number, y: number, now: number) {
