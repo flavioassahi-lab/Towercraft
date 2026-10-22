@@ -815,7 +815,7 @@ const HERO_STATS: Record<HeroKind, {
     specialty: 'basic',
     skill: 'explosion',
     gear: ['Espada', 'Armadura', 'Brasão'],
-    damage: 5,
+    damage: 10,
     range: 62,
     attackRate: 650,
     speed: 205,
@@ -833,7 +833,7 @@ const HERO_STATS: Record<HeroKind, {
     specialty: 'rapid',
     skill: 'clones',
     gear: ['Arco', 'Couraça de Couro', 'Aljava'],
-    damage: 3,
+    damage: 6,
     range: 150,
     attackRate: 380,
     speed: 275,
@@ -851,7 +851,7 @@ const HERO_STATS: Record<HeroKind, {
     specialty: 'sniper',
     skill: 'lightning',
     gear: ['Cajado', 'Manto Arcano', 'Grimório'],
-    damage: 7,
+    damage: 14,
     range: 135,
     attackRate: 900,
     speed: 225,
@@ -945,6 +945,9 @@ function freshEquip(): Record<HeroKind, Record<Gear, number>> {
 const PAYMENT_API = '';
 const REDEEM_SECRET = 'troque-esta-frase-secreta-towercraft';
 const ORDERS_KEY = 'towercraft_orders_v1';
+// MODO TESTE: mostra o botão "ZERAR COMPRAS" na loja de diamantes, para você
+// testar as regras do zero. Troque para false antes de publicar o jogo.
+const TEST_MODE = true;
 const USED_CODES_KEY = 'towercraft_used_codes_v1';
 const PIX_KEY = 'flavioassahi@gmail.com';
 const PIX_NAME = 'FLAVIO ASSAHI';
@@ -11474,7 +11477,45 @@ class GameScene extends BaseScene {
       10, '#cfe8ff',
     );
 
+    if (TEST_MODE) {
+      button(
+        60, 752, 'TESTE · ZERAR COMPRAS E DIAMANTES', '#6a2a2a',
+        () => this.openModal(
+          'ZERAR COMPRAS?',
+          'Remove os diamantes, o nível 6 das torres e o ultimate liberados neste aparelho, e os aliados comprados nesta partida. Os usos grátis voltam para 3. Só para teste.',
+          [
+            { label: 'ZERAR', color: '#8a3a2c', action: () => this.resetPurchases() },
+            { label: 'CANCELAR', color: '#3a4046', action: () => this.openDiamondShop() },
+          ],
+        ),
+        480, 34, 11,
+      );
+    }
+
     button(60, 800, 'VOLTAR', '#3a4046', () => this.openHeroPanel(), 480, 40, 12);
+  }
+
+  private resetPurchases() {
+    this.diamonds = 0;
+    this.lv6 = { basic: false, rapid: false, sniper: false };
+    this.ultUnlocked = false;
+    this.allyCharges = 3;
+    this.ultCharges = 3;
+    this.lifeCharges = 3;
+
+    for (const a of this.allies.filter(x => !x.until)) this.killVisual(a.visual);
+    this.allies = this.allies.filter(x => x.until);
+
+    try {
+      localStorage.removeItem(USED_CODES_KEY);
+      localStorage.removeItem(ORDERS_KEY);
+    } catch {
+      // ignora
+    }
+
+    this.saveDia();
+    this.refreshInterface();
+    this.openDiamondShop('Compras zeradas. Tudo bloqueado de novo, com 3 usos grátis.');
   }
 
   private buyTowerLv6(k: TowerKind) {
