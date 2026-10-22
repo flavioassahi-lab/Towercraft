@@ -72,7 +72,7 @@ const TOWER_STATS: Record<TowerKind, {
     fireRate: 650,
     color: 0x4d91c5,
     cost: 80,
-    description: 'Ataque equilibrado',
+    description: 'Catapulta: pedras em área, só terrestres',
   },
   rapid: {
     name: 'BALISTA',
@@ -816,7 +816,7 @@ const HERO_STATS: Record<HeroKind, {
     skill: 'explosion',
     gear: ['Espada', 'Armadura', 'Brasão'],
     damage: 10,
-    range: 62,
+    range: 85,
     attackRate: 650,
     speed: 205,
     blockRadius: 30,
@@ -1348,11 +1348,11 @@ const SUPREME_DAMAGE = 99999;
 
 const WORLD_INFO: Record<number, { name: string; short: string; cost: number }> = {
   1: { name: 'MUNDO 1 · PRIMITIVO', short: 'M1', cost: 0 },
-  2: { name: 'MUNDO 2 · GRÉCIA ANTIGA', short: 'M2', cost: 20000 },
+  2: { name: 'MUNDO 2 · GRÉCIA ANTIGA', short: 'M2', cost: 25000 },
   3: { name: 'MUNDO 3 · TECNOLÓGICO', short: 'M3', cost: 130000 },
 };
 
-const SUPREME_WORLD_COST = 160000;
+const SUPREME_WORLD_COST = 180000;
 
 // Cenário nos céus (escolha do Mundo Tecnológico no nível 90).
 const SKY_COLORS = {
@@ -1398,9 +1398,9 @@ type Zone = {
 };
 
 const HERO_HP: Record<HeroKind, number> = {
-  guardiao: 260,
-  patrulheiro: 170,
-  arcanista: 150,
+  guardiao: 650,
+  patrulheiro: 450,
+  arcanista: 400,
 };
 
 function towerMaxHp(level: number): number {
@@ -1926,6 +1926,15 @@ class BaseScene extends Phaser.Scene {
       this.towerPrimitive(c, kind, color);
     } else {
       this.towerThemed(c, kind, theme, color);
+    }
+
+    // Guardiã é uma catapulta desde o nível 1: braço de madeira com a pedra.
+    if (kind === 'basic') {
+      const arm = this.add.rectangle(10, -20, 4, 22, 0x6b4a2a).setAngle(-35).setStrokeStyle(1, 0x2a1a0a);
+      const stone = this.add.circle(17, -30, 4.5, 0x8a8478).setStrokeStyle(1, 0x3a3630);
+
+      c.add([arm, stone]);
+      c.setData('catapultStone', stone);
     }
 
     const levelText = this.add.text(15, 13, 'I', {
@@ -3026,6 +3035,17 @@ class GameScene extends BaseScene {
   private repeatGate = false;
   private gatePrompt = false;
   private diamonds = 0;
+  private lastSkillOk = false;
+  private hurtFlash?: Phaser.GameObjects.Rectangle;
+  private hurtFlashAt = 0;
+  private lowHpWarnAt = 0;
+  private hpGfx?: Phaser.GameObjects.Graphics;
+  private hpText?: Phaser.GameObjects.Text;
+  private fountainGfx?: Phaser.GameObjects.Graphics;
+  private fountainLabel?: Phaser.GameObjects.Text;
+  private fountainFxAt = 0;
+  private lifeLock?: Phaser.GameObjects.Container;
+  private cinemaUntil = 0;
   private pixPoll: number | null = null;
   private lv6: Record<TowerKind, boolean> = { basic: false, rapid: false, sniper: false };
   private ultUnlocked = false;
@@ -3260,6 +3280,7 @@ class GameScene extends BaseScene {
     this.drawWorld();
     this.createHero();
     this.createInterface();
+    this.rebuildHeroSelector();
     this.createWorldOverlay();
     this.healthLayer = this.add.graphics().setDepth(8);
     this.tracerLayer = this.add.graphics().setDepth(12);
@@ -3466,20 +3487,7 @@ class GameScene extends BaseScene {
     tower.hp = Math.max(1, Math.min(tower.maxHp, sv.hp));
     visual.setScale(1 + (level - 1) * 0.055);
 
-    if (level >= 5) {
-      visual.add(
-        this.add.circle(0, 2, 25, 0xffd54a, 0.12)
-          .setStrokeStyle(3, GOLD_LIGHT, 0.95),
-      );
-    }
-
-    if (level >= 6) {
-      visual.add(
-        this.add.circle(0, 2, 31, 0xffffff, 0.1)
-          .setStrokeStyle(3, 0x9fe8ff, 0.95)
-          .setBlendMode(Phaser.BlendModes.ADD),
-      );
-    }
+    this.addLevelMarks(visual, sv.kind, level);
 
     const lt = visual.getData('levelText') as Phaser.GameObjects.Text | undefined;
     if (lt) lt.setText(['I', 'II', 'III', 'IV', 'V', 'VI'][level - 1]);
@@ -3555,7 +3563,7 @@ class GameScene extends BaseScene {
       note = `+10 de vida! Gastou ◆${DIAMOND_COST.life}.`;
     } else {
       this.showMessage(
-        `Acabaram os 3 usos grátis. Cada +10 custa ◆${DIAMOND_COST.life} e você tem ◆${this.diamonds}.`,
+        `+10 de vida bloqueado: acabaram os 3 usos grátis. Cada +10 custa ◆${DIAMOND_COST.life} e você tem ◆${this.diamonds}. Compre diamantes na LOJA.`,
       );
       return;
     }
@@ -3621,14 +3629,34 @@ class GameScene extends BaseScene {
       const lt = v.getData('levelText') as Phaser.GameObjects.Text | undefined;
       if (lt) lt.setText(['I', 'II', 'III', 'IV', 'V', 'VI'][t.level - 1]);
 
-      if (t.level >= 5) {
-        v.add(
-          this.add.circle(0, 2, 25, 0xffd54a, 0.12)
-            .setStrokeStyle(3, GOLD_LIGHT, 0.95),
-        );
-      }
+      this.addLevelMarks(v, t.kind, t.level);
 
       t.visual = v;
+    }
+  }
+
+  // Marcas de nível 5 e 6 na cor da própria torre (o amarelo é só da aura).
+  private addLevelMarks(
+    v: Phaser.GameObjects.Container, kind: TowerKind, level: number, only6 = false,
+  ) {
+    const col = TOWER_STATS[kind].color;
+
+    if (level >= 5 && !only6) {
+      v.add(this.add.circle(0, 2, 25, col, 0.1).setStrokeStyle(3, col, 0.95));
+
+      if (kind === 'basic') {
+        // Nível 5: a pedra da catapulta pega fogo.
+        const stone = v.getData('catapultStone') as Phaser.GameObjects.Arc | undefined;
+        stone?.setFillStyle(0xff7a1a).setStrokeStyle(1, 0xffd16b);
+      }
+    }
+
+    if (level >= 6) {
+      v.add(
+        this.add.circle(0, 2, 31, 0xffffff, 0.1)
+          .setStrokeStyle(3, 0x9fe8ff, 0.95)
+          .setBlendMode(Phaser.BlendModes.ADD),
+      );
     }
   }
 
@@ -5358,6 +5386,18 @@ class GameScene extends BaseScene {
       () => this.buyLife(), 11, 38, 20,
     ).setDepth(22);
 
+    // Depois dos 3 grátis o botão fica escuro com o preço em diamantes.
+    this.lifeLock = this.add.container(345, 54).setDepth(23).setVisible(false);
+    this.lifeLock.add([
+      this.add.rectangle(0, 0, 38, 20, 0x0b0d10, 0.82).setStrokeStyle(1, 0x5a5a5a, 1),
+      this.add.text(0, 0, '◆5', {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '10px',
+        color: '#9fd0ff',
+        fontStyle: 'bold',
+      }).setOrigin(0.5),
+    ]);
+
     this.makeButton(
       388, 5, 'MENU', '#3a4a5a',
       () => this.openGameMenu(), 11, 74, 26,
@@ -5848,6 +5888,7 @@ class GameScene extends BaseScene {
     skill: SkillKind,
     rank: number,
     action: () => void,
+    passive = false,
   ): Phaser.GameObjects.Container {
     const size = 34;
 
@@ -5879,6 +5920,34 @@ class GameScene extends BaseScene {
       g.fillRect(-size / 2, -size / 2, size, size);
     }
 
+    if (passive) {
+      // Passiva: sem moldura de botão, brilho verde contínuo e selo "ATIVA".
+      g.lineStyle(2, 0x6dff7a, 0.9);
+      g.strokeRoundedRect(-size / 2 - 2, -size / 2 - 2, size + 4, size + 4, 8);
+
+      const halo = this.add.circle(0, 0, size * 0.62, 0x6dff7a, 0.14)
+        .setBlendMode(Phaser.BlendModes.ADD);
+
+      c.add(halo);
+      this.tweens.add({
+        targets: halo, scale: 1.18, alpha: 0.05, duration: 900, yoyo: true, repeat: -1,
+      });
+
+      c.add(g);
+
+      const tag = this.add.text(0, size / 2 + 1, 'ATIVA', {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '8px',
+        color: '#0b1a0e',
+        fontStyle: 'bold',
+        backgroundColor: '#6dff7a',
+        padding: { x: 3, y: 1 },
+      }).setOrigin(0.5);
+
+      c.add(tag);
+      return c;
+    }
+
     g.lineStyle(2, 0x0a0a0a, 1);
     g.strokeRect(-size / 2, -size / 2, size, size);
     g.lineStyle(1, rank > 0 ? GOLD_LIGHT : 0x6a6250, 1);
@@ -5890,7 +5959,45 @@ class GameScene extends BaseScene {
 
     c.on('pointerdown', () => {
       if (this.gameOver) return;
+
+      // Retorno imediato do toque: o ícone afunda e pisca.
+      const flash = this.add.rectangle(cx, cy, size, size, 0xffffff, 0.55)
+        .setDepth(34)
+        .setBlendMode(Phaser.BlendModes.ADD);
+
+      this.tweens.add({
+        targets: flash, alpha: 0, duration: 260, onComplete: () => flash.destroy(),
+      });
+
+      if (c.active) {
+        this.tweens.add({ targets: c, scale: 0.8, duration: 70, yoyo: true });
+      }
+
+      SFX.play('click');
+      this.lastSkillOk = false;
       action();
+
+      // Deu certo: anel dourado sai do ícone. Não deu: pisca vermelho e treme.
+      if (this.lastSkillOk) {
+        const ring = this.add.circle(cx, cy, size / 2, 0xfff0a0, 0.25)
+          .setStrokeStyle(3, GOLD_LIGHT, 1)
+          .setDepth(34)
+          .setBlendMode(Phaser.BlendModes.ADD);
+
+        this.tweens.add({
+          targets: ring, scale: 2.2, alpha: 0, duration: 450, onComplete: () => ring.destroy(),
+        });
+      } else {
+        const bad = this.add.rectangle(cx, cy, size, size, 0xff3a2a, 0.5).setDepth(34);
+
+        this.tweens.add({
+          targets: bad, alpha: 0, duration: 380, onComplete: () => bad.destroy(),
+        });
+
+        if (c.active) {
+          this.tweens.add({ targets: c, x: cx + 4, duration: 45, yoyo: true, repeat: 2 });
+        }
+      }
     });
 
     return c;
@@ -5925,11 +6032,15 @@ class GameScene extends BaseScene {
       const rank = this.rankOf(skill);
       const rawRank = this.skillLevels[this.rankKey(skill)];
 
+      const noFree = (skill === 'strike' && !this.ultFree())
+        || (skill === 'repair' && !this.allyFree() && this.finalChoice !== 'tech');
+
       this.contextObjects.push(
         this.makeSkillIcon(
           x + 17, 886, skill,
-          skill === 'strike' && !this.ultAllowed() ? 0 : skill === 'aura' ? 1 : rank,
+          noFree ? 0 : skill === 'aura' ? 1 : rank,
           () => this.useSkill(skill),
+          skill === 'aura',
         ),
       );
 
@@ -5972,11 +6083,11 @@ class GameScene extends BaseScene {
 
       const description = this.add.text(
         x, 930,
-        `${skill === 'strike' && !this.ultAllowed() ? 'SEM USOS · ◆' + DIAMOND_COST.cast : info.mana > 0 ? info.mana + ' mana' : 'PASSIVA'}\n${info.description}${skill === 'repair' ? ' Grátis: ' + this.allyCharges + '/3.' : skill === 'strike' && !this.ultUnlocked ? ' Grátis: ' + this.ultCharges + '/3.' : ''}`,
+        `${noFree ? 'SEM USOS · ◆' + DIAMOND_COST.cast + ' cada' : skill === 'aura' ? 'PASSIVA · SEMPRE ATIVA' : info.mana + ' mana'}\n${skill === 'aura' ? 'Não precisa tocar. ' : ''}${info.description}${skill === 'repair' && !noFree ? ' Grátis: ' + this.allyCharges + '/3.' : skill === 'strike' && !noFree && !this.ultUnlocked && this.finalChoice !== 'tech' ? ' Grátis: ' + this.ultCharges + '/3.' : ''}`,
         {
           fontFamily: 'Arial, sans-serif',
           fontSize: '8px',
-          color: '#e0dac8',
+          color: noFree ? '#8a8578' : skill === 'aura' ? '#b9f5c0' : '#e0dac8',
           wordWrap: { width: 93 },
           lineSpacing: 2,
         },
@@ -6024,8 +6135,8 @@ class GameScene extends BaseScene {
       return {
         name: 'AURA',
         description: this.fused
-          ? 'Passiva: reforça TODAS as torres perto do herói (x1,5).'
-          : `Passiva: reforça as torres ${TOWER_STATS[HERO_STATS[this.heroKind].specialty].name} perto do herói.`,
+          ? 'Reforça TODAS as torres perto do herói (x1,5).'
+          : `Reforça as torres ${TOWER_STATS[HERO_STATS[this.heroKind].specialty].name} perto do herói.`,
         mana: 0,
       };
     }
@@ -6518,10 +6629,7 @@ class GameScene extends BaseScene {
     tower.hp = Math.min(tower.maxHp, tower.hp + 250);
 
     if (tower.level === 5) {
-      const crown = this.add.circle(0, 2, 25, 0xffd54a, 0.12)
-        .setStrokeStyle(3, GOLD_LIGHT, 0.95);
-
-      tower.visual.add(crown);
+      this.addLevelMarks(tower.visual, tower.kind, 5);
 
       this.floatText(
         tower.body.x, tower.body.y - 52, 'PODER MÁXIMO!', '#ffe08a', 12,
@@ -6529,11 +6637,7 @@ class GameScene extends BaseScene {
     }
 
     if (tower.level === 6) {
-      const halo = this.add.circle(0, 2, 31, 0xffffff, 0.1)
-        .setStrokeStyle(3, 0x9fe8ff, 0.95)
-        .setBlendMode(Phaser.BlendModes.ADD);
-
-      tower.visual.add(halo);
+      this.addLevelMarks(tower.visual, tower.kind, 6, true);
 
       this.floatText(
         tower.body.x, tower.body.y - 52, 'NV.6: EMPURRÃO!', '#9fe8ff', 12,
@@ -6889,7 +6993,8 @@ class GameScene extends BaseScene {
     const immune = waveId % 5 === 4;
 
     const road = route === 'left' ? LEFT_PATH : RIGHT_PATH;
-    const path = flying ? [road[0], road[road.length - 1]] : road;
+    // Voadores e chefes vão em linha reta até a fortaleza.
+    const path = flying || tier === 'boss' ? [road[0], road[road.length - 1]] : road;
     const start = path[0];
 
     const tierSize = tier === 'boss' ? 1.9 : tier === 'elite' ? 1.35 : 1;
@@ -7139,16 +7244,53 @@ class GameScene extends BaseScene {
         continue;
       }
 
+      // Chefe agressivo: para e ataca torre ou herói por perto. Leva ~10 s
+      // para derrubar qualquer alvo (dano = 10% da vida máxima por segundo).
+      if (enemy.tier === 'boss') {
+        const prey = this.bossPrey(enemy);
+
+        if (prey) {
+          const ph = ((nowMs + enemy.phase * 100) % 520) / 520;
+          const k = ph < 0.3 ? ph / 0.3 : 1 - (ph - 0.3) / 0.7;
+          const bd = Math.hypot(prey.x - enemy.body.x, prey.y - enemy.body.y) || 1;
+          const lx = (prey.x - enemy.body.x) / bd * 16 * k * enemy.size;
+          const ly = (prey.y - enemy.body.y) / bd * 16 * k * enemy.size;
+
+          if (prey.tower) this.hurtTower(prey.tower, prey.tower.maxHp * 0.1 * delta / 1000);
+          else this.hurtHero(this.heroMaxHp * 0.1 * delta / 1000);
+
+          if (this.gameOver) return;
+
+          this.fxLayer.fillStyle(0xff3a2a, 0.5 * k);
+          this.fxLayer.fillCircle(prey.x, prey.y, 10 + 10 * k);
+
+          enemy.visual.setData('facing', prey.x < enemy.body.x ? -1 : 1);
+          enemy.visual.setPosition(enemy.body.x + lx, enemy.body.y + ly);
+          enemy.visual.setScale(
+            ((enemy.visual.getData('facing') as number) || 1) * enemy.size,
+            enemy.size * (1 + k * 0.25),
+          );
+
+          if (enemy.immune || enemy.burnUntil > nowMs || enemy.slowUntil > nowMs) {
+            this.drawEnemyStatus(enemy, nowMs, false);
+          }
+
+          this.drawEnemyHealth(enemy, crowded);
+          continue;
+        }
+      }
+
       const prevX = enemy.body.x;
       const prevY = enemy.body.y;
       const dx = target.x - enemy.body.x;
       const dy = target.y - enemy.body.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
-      const netted = enemy.flying && nowMs < enemy.netUntil;
+      const isBoss = enemy.tier === 'boss';
+      const netted = !isBoss && enemy.flying && nowMs < enemy.netUntil;
       const slow = netted
         ? 0.04
         : !this.fireIceImmune(enemy, nowMs) && enemy.slowUntil > nowMs ? 0.5 : 1;
-      const stunned = enemy.stunUntil > nowMs;
+      const stunned = !isBoss && enemy.stunUntil > nowMs;
       const step = stunned ? 0 : enemy.speed * slow * delta / 1000;
       const angle = Math.atan2(dy, dx);
 
@@ -7216,7 +7358,9 @@ class GameScene extends BaseScene {
           // Paciência: 0,4 s travado (chefes e ondas de múltiplo de 5: 0,2 s).
           enemy.blockedMs > (enemy.tier === 'boss' || enemy.waveId % 5 === 0 ? 200 : 400)
         ) {
-          const dmg = enemy.dps * delta / 1000;
+          const dmg = enemy.tier === 'boss'
+            ? (hit.tower ? hit.tower.maxHp : this.heroMaxHp) * 0.1 * delta / 1000
+            : enemy.dps * delta / 1000;
 
           // Animação de ataque: avança no alvo e incha a cada golpe.
           const ph = ((nowMs + enemy.phase * 100) % 420) / 420;
@@ -7452,8 +7596,34 @@ class GameScene extends BaseScene {
     }
   }
 
+  // Alvo do chefe: a torre ou o herói mais perto, até 75 px.
+  private bossPrey(enemy: Enemy): { x: number; y: number; tower?: Tower } | null {
+    let best: { x: number; y: number; tower?: Tower } | null = null;
+    let bestD = 75 + 10 * enemy.size;
+
+    for (const t of this.towers) {
+      const d = Phaser.Math.Distance.Between(enemy.body.x, enemy.body.y, t.body.x, t.body.y);
+
+      if (d < bestD) {
+        bestD = d;
+        best = { x: t.body.x, y: t.body.y, tower: t };
+      }
+    }
+
+    if (!this.heroDead && this.finalChoice !== 'tech' && this.time.now >= this.heroInvulnUntil) {
+      const d = Phaser.Math.Distance.Between(enemy.body.x, enemy.body.y, this.hero.x, this.hero.y);
+
+      if (d < bestD) best = { x: this.hero.x, y: this.hero.y };
+    }
+
+    return best;
+  }
+
   private stunEnemy(enemy: Enemy, now: number) {
-    enemy.stunUntil = now + (enemy.tier === 'boss' ? 500 : 1000);
+    // Chefes são imunes a atordoamento.
+    if (enemy.tier === 'boss') return;
+
+    enemy.stunUntil = now + 1000;
   }
 
   private clampToRoad(enemy: Enemy) {
@@ -7516,6 +7686,26 @@ class GameScene extends BaseScene {
     this.heroHitAt = now;
     SFX.play('hurt');
     this.emote(this.heroVisual, 'hurt', 500);
+
+    // Piscada vermelha rápida na tela (no máximo a cada 0,35 s).
+    if (now - this.hurtFlashAt > 350) {
+      this.hurtFlashAt = now;
+
+      if (!this.hurtFlash || !this.hurtFlash.scene) {
+        this.hurtFlash = this.add.rectangle(300, 500, WIDTH, HEIGHT, 0xff1a1a, 1)
+          .setDepth(60)
+          .setAlpha(0);
+      }
+
+      this.tweens.killTweensOf(this.hurtFlash);
+      this.hurtFlash.setAlpha(0.28);
+      this.tweens.add({ targets: this.hurtFlash, alpha: 0, duration: 220 });
+    }
+
+    if (this.heroHp < this.heroMaxHp * 0.3 && now - this.lowHpWarnAt > 8000) {
+      this.lowHpWarnAt = now;
+      this.showMessage('Vida do herói baixa! Leve-o até a FONTE DE VIDA perto da fortaleza.');
+    }
 
     if (this.heroHp <= 0) this.killHero();
   }
@@ -7749,9 +7939,13 @@ class GameScene extends BaseScene {
 
       let target: Enemy | undefined;
       let closest = tower.range;
+      const catapult = tower.kind === 'basic';
 
       for (const enemy of this.enemies) {
         if (!enemy.alive) continue;
+
+        // Catapulta só acerta quem está no chão (voador só se preso na rede).
+        if (catapult && enemy.flying && now >= enemy.netUntil) continue;
 
         const distance = Phaser.Math.Distance.Between(
           tower.body.x, tower.body.y,
@@ -7768,6 +7962,18 @@ class GameScene extends BaseScene {
 
       const boost = this.auraFor(tower.kind, tower.body.x, tower.body.y);
       let rate = tower.fireRate / (boost ? boost.spd : 1);
+
+      if (catapult) {
+        // Catapulta: mais cadenciada (2,6x mais lenta) e bem mais forte (3,5x).
+        tower.cooldown = rate * 2.6;
+
+        let raw = tower.damage * tower.level * 3.5;
+        if (boost) raw *= boost.dmg;
+        if (this.finalChoice === 'tech') raw *= 1.3;
+
+        this.launchCatapult(tower, target, raw);
+        continue;
+      }
 
       // Balista nível 5: modo metralhadora
       let stunNow = false;
@@ -7804,13 +8010,104 @@ class GameScene extends BaseScene {
       if (stunNow && target.alive) this.stunEnemy(target, now);
 
       if (tower.level >= 5) {
-        if (tower.kind === 'basic') {
-          this.fireballBlast(tx, ty, raw * 0.6, target);
-        } else if (tower.kind === 'sniper') {
+        if (tower.kind === 'sniper') {
           this.slowArea(tx, ty, now);
         }
       }
     }
+  }
+
+  // Guardiã nv.5: catapulta lança uma bola de fogo em arco que cai no alvo.
+  private launchCatapult(tower: Tower, target: Enemy, raw: number) {
+    const sx = tower.body.x + 12;
+    const sy = tower.body.y - 28;
+    const flight = 750;
+    const fire = tower.level >= 5;
+    const ball = this.add.circle(sx, sy, fire ? 8 : 7, fire ? 0xff7a1a : 0x8a8478)
+      .setStrokeStyle(2, fire ? 0xffd16b : 0x3a3630, 1)
+      .setDepth(15);
+    const glow = this.add.circle(sx, sy, 14, 0xff9a2a, fire ? 0.35 : 0)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(14);
+    const shadow = this.add.ellipse(sx, tower.body.y, 14, 6, 0x000000, 0.35).setDepth(4);
+    let lastX = target.body.x;
+    let lastY = target.body.y;
+    const p = { t: 0 };
+
+    SFX.play('t_basic');
+    this.tweens.add({ targets: tower.visual, angle: -6, duration: 90, yoyo: true });
+
+    this.tweens.add({
+      targets: p,
+      t: 1,
+      duration: flight,
+      onUpdate: () => {
+        if (target.alive) {
+          lastX = target.body.x;
+          lastY = target.body.y;
+        }
+
+        const gx = sx + (lastX - sx) * p.t;
+        const gy = sy + (lastY - sy) * p.t;
+        const arc = Math.sin(p.t * Math.PI) * 130;
+
+        ball.setPosition(gx, gy - arc).setScale(1 + Math.sin(p.t * Math.PI) * 0.5);
+        glow.setPosition(gx, gy - arc);
+        shadow.setPosition(gx, gy + 4).setScale(0.6 + p.t * 0.6);
+
+        if (fire) {
+          this.tracers.push({
+            x1: gx, y1: gy - arc, x2: gx - 4, y2: gy - arc + 6, ttl: 220, life: 220, w: 5, color: 0xff6a1a,
+          });
+        }
+      },
+      onComplete: () => {
+        ball.destroy();
+        glow.destroy();
+        shadow.destroy();
+
+        if (this.gameOver) return;
+
+        if (target.alive && Phaser.Math.Distance.Between(target.body.x, target.body.y, lastX, lastY) < 40) {
+          this.damageEnemy(target, raw * target.resist.basic);
+          if (tower.level >= 6 && target.alive && this.towers.includes(tower)) this.pushWave(target);
+        }
+
+        this.catapultBlast(lastX, lastY, raw * 0.6, target, fire);
+        this.cameras.main.shake(90, 0.003);
+        SFX.play(fire ? 'explosion' : 't_basic');
+      },
+    });
+  }
+
+  // Explosão da catapulta: só atinge quem está no chão.
+  private catapultBlast(x: number, y: number, raw: number, main: Enemy, fire: boolean) {
+    const now = this.time.now;
+
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      if (e.flying && now >= e.netUntil) continue;
+      if (Phaser.Math.Distance.Between(e.body.x, e.body.y, x, y) > 64) continue;
+
+      if (e !== main) this.damageEnemy(e, raw * e.resist.basic);
+
+      // Só no nível 5: incendeia e deixa fogo no chão.
+      if (fire && e.alive) {
+        e.burnUntil = now + 2500;
+        e.burnDps = Math.max(e.burnDps, raw * 0.35 * e.resist.basic);
+      }
+    }
+
+    if (fire) this.addZone('fire', x, y, 52, now, raw * 0.35);
+
+    const blast = this.add.circle(x, y, 14, fire ? 0xff8a2a : 0x9a8f7a, 0.6)
+      .setStrokeStyle(4, fire ? 0xffd16b : 0x5a5248, 0.95)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(13);
+
+    this.tweens.add({
+      targets: blast, scale: 5, alpha: 0, duration: 340, onComplete: () => blast.destroy(),
+    });
   }
 
   // Balista nv.5: lança uma rede em área num voador (recarga de 12 s).
@@ -8347,7 +8644,7 @@ class GameScene extends BaseScene {
       this.heroRange += 5;
 
       if (this.heroKind === 'guardiao' && !this.fused && this.finalChoice !== 'tech') {
-        this.heroRange = Math.min(this.heroRange, 95);
+        this.heroRange = Math.min(this.heroRange, 125);
       }
 
       this.maxMana += 5;
@@ -8411,7 +8708,7 @@ class GameScene extends BaseScene {
           .join(' e ');
 
       this.showMessage(
-        `AURA é passiva (Nv.${this.skillLevels.aura}): reforça ${names} que estiverem perto do herói (anel dourado). Fique perto das torres!`,
+        `AURA é passiva e já está sempre ativa (Nv.${this.skillLevels.aura}). Reforça ${names} perto do herói: as torres reforçadas ficam com um círculo amarelo.`,
       );
       return;
     }
@@ -8458,6 +8755,12 @@ class GameScene extends BaseScene {
     }
 
     const ok = this.mana < manaBefore || (this.finalChoice === 'tech' && skill !== 'repair');
+
+    this.lastSkillOk = ok;
+
+    if (ok && skill !== 'strike') {
+      this.floatText(this.hero.x, this.hero.y - 64, info.name + '!', '#fff0a0', 14);
+    }
 
     if (ok && skill === 'strike' && this.finalChoice !== 'tech' && !this.ultUnlocked) {
       if (this.ultCharges > 0) {
@@ -8602,7 +8905,7 @@ class GameScene extends BaseScene {
   // ---------- GOLPE HEROICO: o poder final, único de cada herói ----------
 
   private ultDamage(rank: number): number {
-    return (40 + this.heroLevel * 8 + rank * 25)
+    return (400 + this.heroLevel * 80 + rank * 250)
       * (this.finalChoice === 'tech' ? 200 : 1);
   }
 
@@ -8640,6 +8943,12 @@ class GameScene extends BaseScene {
 
     const dmg = this.ultDamage(rank);
 
+    this.playUltCinema(() => this.releaseUlt(dmg, rank));
+  }
+
+  private releaseUlt(dmg: number, rank: number) {
+    if (this.gameOver) return;
+
     if (this.fused) {
       this.ultSlam(dmg, rank);
       this.time.delayedCall(450, () => { if (!this.gameOver) this.ultArrows(dmg, rank); });
@@ -8661,6 +8970,92 @@ class GameScene extends BaseScene {
       this.ultMeteor(dmg, rank);
       this.floatText(this.hero.x, this.hero.y - 70, 'METEORO ARCANO!', '#d0b0ff', 16);
     }
+  }
+
+  // Cena curta (2 s) do ultimate. O jogo congela enquanto ela passa.
+  private playUltCinema(done: () => void) {
+    const D = 95;
+    const ms = 2000;
+    const kind = this.heroKind;
+    const fused = this.fused;
+    const info = fused ? STRIKE_INFO.fused : STRIKE_INFO[kind];
+    const col = fused ? 0xfff0a0 : kind === 'guardiao' ? 0xffb347 : kind === 'patrulheiro' ? 0x7dff9a : 0xb08cff;
+    const css = '#' + col.toString(16).padStart(6, '0');
+    const objs: Phaser.GameObjects.GameObject[] = [];
+    const keep = <T extends Phaser.GameObjects.GameObject>(o: T): T => {
+      objs.push(o);
+      return o;
+    };
+
+    this.cinemaUntil = this.time.now + ms;
+
+    keep(this.add.rectangle(300, 500, WIDTH, HEIGHT, 0x000000, 0.72).setDepth(D).setInteractive());
+
+    const burst = keep(this.add.graphics().setDepth(D + 1).setBlendMode(Phaser.BlendModes.ADD));
+
+    for (let i = 0; i < 18; i++) {
+      const a = (Math.PI * 2 * i) / 18;
+      burst.fillStyle(col, i % 2 ? 0.18 : 0.32);
+      burst.fillTriangle(
+        0, 0,
+        Math.cos(a - 0.09) * 700, Math.sin(a - 0.09) * 700,
+        Math.cos(a + 0.09) * 700, Math.sin(a + 0.09) * 700,
+      );
+    }
+
+    burst.setPosition(300, 470);
+    this.tweens.add({ targets: burst, angle: 40, duration: ms });
+
+    // Linhas de velocidade
+    for (let i = 0; i < 14; i++) {
+      const y = 260 + i * 34;
+      const line = keep(
+        this.add.rectangle(700, y, 120 + (i % 3) * 60, 3, 0xffffff, 0.5).setDepth(D + 2),
+      );
+
+      this.tweens.add({ targets: line, x: -200, duration: 380 + (i % 4) * 90, delay: i * 40, repeat: 3 });
+    }
+
+    const top = keep(this.add.rectangle(300, -60, WIDTH, 120, 0x000000, 1).setDepth(D + 6));
+    const bot = keep(this.add.rectangle(300, HEIGHT + 60, WIDTH, 120, 0x000000, 1).setDepth(D + 6));
+
+    this.tweens.add({ targets: top, y: 120, duration: 260 });
+    this.tweens.add({ targets: bot, y: HEIGHT - 120, duration: 260 });
+
+    const hero = keep(
+      (fused ? this.buildActiveVisual(-120, 520) : this.createHeroVisual(kind, -120, 520, this.equip[kind]))
+        .setDepth(D + 3)
+        .setScale(6),
+    );
+
+    this.setFace(hero as Phaser.GameObjects.Container, 'angry');
+    this.tweens.add({ targets: hero, x: 300, duration: 420, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: hero, scale: 7, delay: 900, duration: 600, ease: 'Sine.easeIn' });
+
+    const title = keep(this.add.text(300, 320, info.name, {
+      fontFamily: 'Georgia, serif',
+      fontSize: '44px',
+      color: css,
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 8,
+      align: 'center',
+    }).setOrigin(0.5).setDepth(D + 4).setScale(2.4).setAlpha(0));
+
+    this.tweens.add({ targets: title, scale: 1, alpha: 1, delay: 300, duration: 260, ease: 'Back.easeOut' });
+
+    this.fitText(title, 540);
+
+    this.time.delayedCall(1500, () => {
+      this.cameras.main.flash(250, 255, 255, 255);
+      this.cameras.main.shake(300, 0.012);
+    });
+
+    this.time.delayedCall(ms, () => {
+      for (const o of objs) if (o.active) this.killVisual(o);
+      this.cinemaUntil = 0;
+      done();
+    });
   }
 
   // Guardião: esmaga o chão com uma onda de choque dourada.
@@ -8774,7 +9169,7 @@ class GameScene extends BaseScene {
         hits++;
 
         if (e.alive) {
-          e.stunUntil = Math.max(e.stunUntil, now + (e.tier === 'boss' ? 700 : 1500));
+          if (e.tier !== 'boss') e.stunUntil = Math.max(e.stunUntil, now + 1500);
         }
       }
     }
@@ -9041,6 +9436,8 @@ class GameScene extends BaseScene {
   }
 
   private refreshInterface() {
+    this.drawHeroHpBar();
+    this.lifeLock?.setVisible(this.lifeCharges <= 0);
     const now = this.time.now;
     const shield = this.shieldUntil > now;
 
@@ -9333,7 +9730,7 @@ class GameScene extends BaseScene {
     // Só vale perto de um herói do tipo certo (ou do herói fundido).
     const src: Array<{ x: number; y: number }> = [];
 
-    if (this.fused || HERO_STATS[this.heroKind].specialty === kind) {
+    if (!this.heroDead && (this.fused || HERO_STATS[this.heroKind].specialty === kind)) {
       src.push({ x: this.hero.x, y: this.hero.y });
     }
 
@@ -9364,7 +9761,9 @@ class GameScene extends BaseScene {
     const pulse = 0.55 + 0.25 * Math.sin(this.time.now / 300);
     // Anel discreto mostrando o alcance da aura de cada herói.
     const pulse2 = 0.1 + 0.05 * Math.sin(this.time.now / 400);
-    const rings: Array<{ x: number; y: number }> = [{ x: this.hero.x, y: this.hero.y }];
+    const rings: Array<{ x: number; y: number }> = [];
+
+    if (!this.heroDead) rings.push({ x: this.hero.x, y: this.hero.y });
     for (const c of this.companions) rings.push({ x: c.x, y: c.y });
 
     for (const r of rings) {
@@ -9372,6 +9771,7 @@ class GameScene extends BaseScene {
       g.strokeCircle(r.x, r.y, AURA_RANGE);
     }
 
+    // Só as torres que estão de fato recebendo a aura ganham o círculo amarelo.
     for (const t of this.towers) {
       if (!this.auraFor(t.kind, t.body.x, t.body.y)) continue;
 
@@ -9414,7 +9814,7 @@ class GameScene extends BaseScene {
 
     // Guardião luta de perto com a espada.
     if (!f && this.heroKind === 'guardiao') {
-      this.heroRange = Math.min(this.heroRange, 95);
+      this.heroRange = Math.min(this.heroRange, 125);
     }
     this.heroAttackRate = f ? 360 : st.attackRate;
     this.heroSpeed = (f ? 255 : st.speed) + eq.armor * 8;
@@ -9440,7 +9840,7 @@ class GameScene extends BaseScene {
     const baseHp = this.fused
       ? HERO_HP.guardiao + HERO_HP.patrulheiro + HERO_HP.arcanista
       : HERO_HP[this.heroKind];
-    const max = baseHp + (this.heroLevel - 1) * 15 + eq.armor * 40;
+    const max = baseHp + (this.heroLevel - 1) * 35 + eq.armor * 80;
     const ratio = this.heroMaxHp > 0 ? this.heroHp / this.heroMaxHp : 1;
 
     this.heroMaxHp = max;
@@ -9587,6 +9987,121 @@ class GameScene extends BaseScene {
   }
 
   // Seletor de heróis: botões à esquerda da fortaleza.
+  // Barra de vida do herói controlado, embaixo do retrato dele.
+  private drawHeroHpBar() {
+    if (!this.hpGfx || !this.hpGfx.scene) {
+      this.hpGfx = this.add.graphics().setDepth(22);
+      this.hpText = this.add.text(0, 0, '', {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '9px',
+        color: '#ffffff',
+        fontStyle: 'bold',
+        stroke: '#000000',
+        strokeThickness: 3,
+      }).setOrigin(0.5).setDepth(23);
+    }
+
+    const g = this.hpGfx;
+    const txt = this.hpText as Phaser.GameObjects.Text;
+    const r = this.selectorRects.find(o => o.kind === this.heroKind) ?? this.selectorRects[0];
+
+    g.clear();
+
+    if (!r || this.finalChoice === 'tech') {
+      txt.setVisible(false);
+      return;
+    }
+
+    const ratio = this.heroDead ? 0 : Math.max(0, this.heroHp / this.heroMaxHp);
+    const now = this.time.now;
+    const hit = now - this.heroHitAt < 250;
+    const low = ratio < 0.3 && !this.heroDead;
+    const col = ratio > 0.6 ? 0x4cd964 : ratio > 0.3 ? 0xf2c94c : 0xe8574c;
+    const x = r.x;
+    const y = r.y + r.h + 3;
+    const w = r.w;
+
+    g.fillStyle(0x000000, 0.85);
+    g.fillRect(x - 1, y - 1, w + 2, 12);
+    g.fillStyle(0x3a1a1a, 1);
+    g.fillRect(x, y, w, 10);
+    g.fillStyle(hit ? 0xffffff : col, low ? 0.6 + 0.4 * Math.sin(now / 90) : 1);
+    g.fillRect(x, y, w * ratio, 10);
+    g.lineStyle(1, low ? 0xff5a45 : GOLD_DARK, 1);
+    g.strokeRect(x - 1, y - 1, w + 2, 12);
+
+    txt.setVisible(true)
+      .setPosition(x + w / 2, y + 5)
+      .setText(this.heroDead ? 'CAÍDO' : `♥ ${Math.ceil(this.heroHp)}`);
+  }
+
+  // Fonte de vida perto da fortaleza: o herói recupera vida bem rápido.
+  private updateFountain(delta: number) {
+    const fx = 300;
+    const fy = 690;
+    const now = this.time.now;
+
+    if (!this.fountainGfx || !this.fountainGfx.scene) {
+      this.fountainGfx = this.add.graphics().setDepth(3);
+      this.fountainLabel = this.add.text(fx, fy + 22, 'FONTE DE VIDA', {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '8px',
+        color: '#bff7ff',
+        fontStyle: 'bold',
+        stroke: '#000000',
+        strokeThickness: 3,
+      }).setOrigin(0.5).setDepth(3);
+    }
+
+    const g = this.fountainGfx;
+    const near = !this.heroDead
+      && Phaser.Math.Distance.Between(this.hero.x, this.hero.y, fx, fy) <= 75;
+    const healing = near && this.heroHp < this.heroMaxHp;
+
+    g.clear();
+
+    // Área de cura
+    g.fillStyle(0x4cd9ff, healing ? 0.14 : 0.06);
+    g.fillCircle(fx, fy, 75);
+    g.lineStyle(2, 0x7fe8ff, healing ? 0.7 + 0.3 * Math.sin(now / 120) : 0.3);
+    g.strokeCircle(fx, fy, 75);
+
+    // Bacia de pedra e água
+    g.fillStyle(0x5a5a52, 1);
+    g.fillEllipse(fx, fy + 6, 44, 20);
+    g.fillStyle(0x8a8a7e, 1);
+    g.fillEllipse(fx, fy + 3, 40, 16);
+    g.fillStyle(0x2a8ad0, 1);
+    g.fillEllipse(fx, fy + 3, 32, 11);
+    g.fillStyle(0x9fe8ff, 0.6 + 0.3 * Math.sin(now / 200));
+    g.fillEllipse(fx, fy + 2, 18, 5);
+
+    // Jato de água
+    const jet = 14 + 3 * Math.sin(now / 90);
+    g.fillStyle(0xbff7ff, 0.85);
+    g.fillRect(fx - 2, fy - jet, 4, jet);
+    g.fillCircle(fx, fy - jet, 3.5);
+
+    for (let k = 0; k < 4; k++) {
+      const ph = ((now / 600) + k / 4) % 1;
+      const side = k % 2 ? 1 : -1;
+
+      g.fillStyle(0xbff7ff, 1 - ph);
+      g.fillCircle(fx + side * ph * 14, fy - jet + ph * (jet + 2), 1.8);
+    }
+
+    if (!healing) return;
+
+    this.heroHp = Math.min(this.heroMaxHp, this.heroHp + this.heroMaxHp * 0.12 * delta / 1000);
+
+    if (now - this.fountainFxAt > 350) {
+      this.fountainFxAt = now;
+      this.floatText(
+        this.hero.x + Phaser.Math.Between(-12, 12), this.hero.y - 30, '+', '#7dff9a', 16,
+      );
+    }
+  }
+
   private rebuildHeroSelector() {
     for (const o of this.selectorObjs) {
       if (o.active) this.killVisual(o);
@@ -9595,9 +10110,9 @@ class GameScene extends BaseScene {
     this.selectorObjs = [];
     this.selectorRects = [];
 
-    if (this.fused || !this.companions.length) return;
+    const list: HeroKind[] = this.fused ? [this.heroKind] : this.presentHeroes();
 
-    this.presentHeroes().forEach((k, i) => {
+    list.forEach((k, i) => {
       const x = 8 + i * 54;
       const y = 762;
       const w = 50;
@@ -9610,11 +10125,13 @@ class GameScene extends BaseScene {
       bg.lineStyle(active ? 3 : 1, active ? GOLD_LIGHT : 0x6a6250, 1);
       bg.strokeRoundedRect(x, y, w, h, 6);
 
-      const v = this.createHeroVisual(k, x + w / 2, y + 30, this.equip[k])
+      const v = (this.fused
+        ? this.buildActiveVisual(x + w / 2, y + 30)
+        : this.createHeroVisual(k, x + w / 2, y + 30, this.equip[k]))
         .setScale(0.8)
         .setDepth(21);
 
-      const name = this.add.text(x + w / 2, y + h - 7, HERO_STATS[k].name.slice(0, 5), {
+      const name = this.add.text(x + w / 2, y + h - 7, this.fused ? 'FUSÃO' : HERO_STATS[k].name.slice(0, 5), {
         fontFamily: 'Georgia, serif',
         fontSize: '8px',
         color: active ? '#f0d58a' : '#a8a08a',
@@ -9710,8 +10227,137 @@ class GameScene extends BaseScene {
     ]);
   }
 
-  private fuseHeroes() {
+  // Céus: cena de 5 s com os 3 heróis girando e se fundindo em um só.
+  private playFusionCinema() {
+    const D = 95;
+    const ms = 5000;
+    const objs: Phaser.GameObjects.GameObject[] = [];
+    const keep = <T extends Phaser.GameObjects.GameObject>(o: T): T => {
+      objs.push(o);
+      return o;
+    };
+
+    this.closeModal();
+    this.cinemaUntil = this.time.now + ms + 200;
+    this.modalOpen = true;
+    SFX.play('summon');
+
+    const bg = keep(this.add.graphics().setDepth(D).setAlpha(0));
+    this.fillVGradient(bg, 0, 0, WIDTH, HEIGHT, 0x0b2a6a, 0xffe9a8, 1, 16);
+    keep(this.add.rectangle(300, 500, WIDTH, HEIGHT, 0x000000, 0.01).setDepth(D + 20).setInteractive());
+    this.tweens.add({ targets: bg, alpha: 1, duration: 500 });
+
+    const rays = keep(this.add.graphics().setDepth(D + 1).setBlendMode(Phaser.BlendModes.ADD).setPosition(300, 500));
+
+    for (let i = 0; i < 16; i++) {
+      const a = (Math.PI * 2 * i) / 16;
+      rays.fillStyle(0xfff3b0, 0.12);
+      rays.fillTriangle(0, 0, Math.cos(a - 0.1) * 800, Math.sin(a - 0.1) * 800, Math.cos(a + 0.1) * 800, Math.sin(a + 0.1) * 800);
+    }
+
+    this.tweens.add({ targets: rays, angle: 90, duration: ms });
+
+    const say = (text: string, at: number, size = 26) => {
+      const t = keep(this.add.text(300, 190, text, {
+        fontFamily: 'Georgia, serif',
+        fontSize: `${size}px`,
+        color: '#fff3cc',
+        fontStyle: 'bold',
+        align: 'center',
+        stroke: '#1a1030',
+        strokeThickness: 6,
+        wordWrap: { width: 520 },
+      }).setOrigin(0.5).setDepth(D + 6).setAlpha(0));
+
+      this.tweens.add({ targets: t, alpha: 1, duration: 300, delay: at });
+      this.tweens.add({ targets: t, alpha: 0, duration: 300, delay: at + 1300 });
+    };
+
+    say('Os três heróis respondem ao chamado dos céus...', 300, 22);
+
+    const colors = [0xe2574c, 0x7dff9a, 0xb08cff];
+    const heroes = HERO_ORDER.map((k, i) => {
+      const v = keep(this.createHeroVisual(k, 300, 500, this.equip[k]).setDepth(D + 3).setScale(4));
+      const trail = keep(this.add.circle(300, 500, 26, colors[i], 0.35).setDepth(D + 2).setBlendMode(Phaser.BlendModes.ADD));
+
+      return { v, trail, base: (Math.PI * 2 * i) / 3 };
+    });
+
+    // Giram cada vez mais rápido e mais perto do centro (0,4 s a 3,2 s).
+    const orbit = { t: 0 };
+
+    this.tweens.add({
+      targets: orbit,
+      t: 1,
+      delay: 400,
+      duration: 2800,
+      ease: 'Quad.easeIn',
+      onUpdate: () => {
+        const r = 190 * (1 - orbit.t) + 4;
+        const spin = orbit.t * orbit.t * 14;
+
+        for (const h of heroes) {
+          const a = h.base + spin;
+          const x = 300 + Math.cos(a) * r;
+          const y = 500 + Math.sin(a) * r * 0.55;
+
+          h.v.setPosition(x, y).setScale(4 - orbit.t * 1.5);
+          h.trail.setPosition(x, y - 20).setScale(1 + orbit.t * 1.5);
+        }
+      },
+    });
+
+    // Luz forte, a fusão acontece por trás e surge o deus.
+    this.time.delayedCall(3200, () => {
+      this.cameras.main.flash(500, 255, 250, 220);
+      this.cameras.main.shake(400, 0.012);
+      SFX.play('ult');
+
+      for (const h of heroes) {
+        this.killVisual(h.v);
+        this.killVisual(h.trail);
+      }
+
+      for (let i = 0; i < 3; i++) {
+        const ring = keep(this.add.circle(300, 480, 20, 0xffffff, 0.3)
+          .setStrokeStyle(5, colors[i], 1).setDepth(D + 4).setBlendMode(Phaser.BlendModes.ADD));
+
+        this.tweens.add({ targets: ring, scale: 12 + i * 3, alpha: 0, duration: 900, delay: i * 120 });
+      }
+
+      this.fuseHeroes(true);
+
+      const god = keep(this.buildActiveVisual(300, 520).setDepth(D + 5).setScale(0.5).setAlpha(0));
+
+      this.tweens.add({ targets: god, scale: 4.5, alpha: 1, duration: 600, ease: 'Back.easeOut' });
+      this.tweens.add({ targets: god, y: 505, duration: 700, yoyo: true, repeat: 1, delay: 600 });
+
+      say('NASCE O DEUS SUPREMO!', 200, 34);
+    });
+
+    this.time.delayedCall(ms, () => {
+      this.cameras.main.fadeOut(200, 255, 255, 255);
+
+      this.time.delayedCall(220, () => {
+        for (const o of objs) if (o.active) this.killVisual(o);
+        this.cinemaUntil = 0;
+        this.modalOpen = false;
+        this.cameras.main.fadeIn(300, 255, 255, 255);
+        this.refreshInterface();
+      });
+    });
+  }
+
+  private fuseHeroes(auto = false) {
     if (!this.canFuse()) return;
+
+    if (this.heroDead && auto) {
+      // Na fusão automática o herói caído volta de graça.
+      this.heroDead = false;
+      this.hero.setPosition(300, 700);
+      this.heroVisual.setPosition(300, 700).setVisible(true);
+      this.heroLabel.setPosition(300, 658).setVisible(true);
+    }
 
     if (this.heroDead) {
       this.closeModal();
@@ -10012,7 +10658,10 @@ class GameScene extends BaseScene {
       () => {
         this.showMessage('Mundo escolhido. Inicie a onda 91.');
 
-        if (this.canFuse()) this.openFusionOffer();
+        if (!this.canFuse()) return;
+
+        if (this.finalChoice === 'tech') this.playFusionCinema();
+        else this.fuseHeroes(true);
       },
     );
   }
@@ -10023,7 +10672,7 @@ class GameScene extends BaseScene {
     if (this.fused) return ['explosion', 'clones', 'lightning', 'strike'];
 
     // O Golpe Heroico (ultimate) é sempre o último.
-    return [HERO_STATS[this.heroKind].skill, 'repair', 'aura', 'strike'];
+    return [HERO_STATS[this.heroKind].skill, 'aura', 'repair', 'strike'];
   }
 
   private heroBlockRadius(): number {
@@ -10036,8 +10685,8 @@ class GameScene extends BaseScene {
 
     if (t.kind === 'basic') {
       return on
-        ? 'PODER NV.5: bolas de fogo em área; deixam fogo no chão e incendeiam 2 s.'
-        : 'Nv.5 libera: bolas de fogo em área.';
+        ? 'PODER NV.5: as pedras da catapulta viram BOLAS DE FOGO, incendeiam e deixam fogo no chão. Só acerta terrestres (voadores só presos na rede da Balista).'
+        : 'Catapulta: pedras em área, só terrestres. Nv.5 libera: bolas de fogo.';
     }
 
     if (t.kind === 'rapid') {
@@ -11306,7 +11955,7 @@ class GameScene extends BaseScene {
       () => {
         this.showMessage('Mundo Real! Você voltou à onda 90. Inicie a onda 91.');
         this.refreshInterface();
-        if (this.canFuse()) this.openFusionOffer();
+        if (this.canFuse()) this.fuseHeroes(true);
       },
     );
   }
@@ -11353,6 +12002,15 @@ class GameScene extends BaseScene {
     this.showMessage(`Nível 6 liberado para a torre ${TOWER_STATS[k].name}! Toque na torre para melhorar.`);
     this.closeContextMenu();
     this.refreshInterface();
+  }
+
+  // Ainda tem uso grátis (ou liberado para sempre)? Senão o ícone fica apagado.
+  private ultFree(): boolean {
+    return this.ultUnlocked || this.finalChoice === 'tech' || this.ultCharges > 0;
+  }
+
+  private allyFree(): boolean {
+    return this.allyCharges > 0;
   }
 
   private ultAllowed(): boolean {
@@ -12230,6 +12888,7 @@ class GameScene extends BaseScene {
 
   update(_time: number, delta: number) {
     if (this.gameOver || this.menuOpen) return;
+    if (this.cinemaUntil > this.time.now) return;
 
     SFX.ambient(this.finalChoice === 'tech' ? 'sky' : this.worldTheme());
     this.supremeTick();
@@ -12246,6 +12905,7 @@ class GameScene extends BaseScene {
     this.tickPoses();
     this.drawTracers(delta);
     this.updateAura();
+    this.updateFountain(delta);
     this.updateHeroCombat(delta);
     this.checkCompletedWaves();
     this.drawSelectedRange();
@@ -12327,14 +12987,6 @@ class GameScene extends BaseScene {
             this.wave = MAX_WAVES - 1;
             this.refreshInterface();
             this.showMessage('Toque em INICIAR ONDA 100 para enfrentar o chefão de novo.');
-          },
-        },
-        {
-          label: 'FINALIZAR',
-          color: '#3a4046',
-          action: () => {
-            this.closeModal();
-            this.playEnding();
           },
         },
       ],
