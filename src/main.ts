@@ -1344,8 +1344,9 @@ type TechSnap = {
 };
 
 const SUPREME_COINS = 999999999;
-// Nos céus: metade da força e 1/4 do alcance de antes (era 99999 e 440).
-const SUPREME_DAMAGE = 50000;
+// Nos céus: ataque bem mais fraco para os monstros aguentarem alguns golpes
+// (antes era 99999) e 1/4 do alcance (antes 440).
+const SUPREME_DAMAGE = 30;
 const SUPREME_RANGE = 110;
 
 const WORLD_INFO: Record<number, { name: string; short: string; cost: number }> = {
@@ -9476,7 +9477,7 @@ class GameScene extends BaseScene {
     }
 
     this.manaText.setText(
-      `MANA  ${Math.floor(this.mana)} / ${this.maxMana}`,
+      this.finalChoice === 'tech' ? 'MANA  ∞' : `MANA  ${Math.floor(this.mana)} / ${this.maxMana}`,
     );
 
     this.xpText.setText(`XP  ${this.xp} / ${this.heroLevel * 50}`);
@@ -11824,7 +11825,7 @@ class GameScene extends BaseScene {
     for (const e of [...this.enemies]) {
       if (!e.alive) continue;
 
-      if (Phaser.Math.Distance.Between(e.body.x, e.body.y, tx, ty) <= (this.fused ? 230 : 130)) {
+      if (Phaser.Math.Distance.Between(e.body.x, e.body.y, tx, ty) <= (this.fused ? 80 : 60)) {
         this.damageEnemy(e, dmg);
       }
     }
