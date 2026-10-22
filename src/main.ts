@@ -1344,7 +1344,9 @@ type TechSnap = {
 };
 
 const SUPREME_COINS = 999999999;
-const SUPREME_DAMAGE = 99999;
+// Nos céus: metade da força e 1/4 do alcance de antes (era 99999 e 440).
+const SUPREME_DAMAGE = 50000;
+const SUPREME_RANGE = 110;
 
 const WORLD_INFO: Record<number, { name: string; short: string; cost: number }> = {
   1: { name: 'MUNDO 1 · PRIMITIVO', short: 'M1', cost: 0 },
@@ -9827,7 +9829,7 @@ class GameScene extends BaseScene {
     // Mundo Tecnológico: heróis com poder supremo.
     if (this.finalChoice === 'tech') {
       this.heroDamage = SUPREME_DAMAGE;
-      this.heroRange = 440;
+      this.heroRange = SUPREME_RANGE;
       this.heroAttackRate = 140;
       this.heroSpeed = Math.max(this.heroSpeed, 300);
     }
@@ -9909,8 +9911,8 @@ class GameScene extends BaseScene {
       const st = HERO_STATS[c.kind];
       const eq = this.equip[c.kind];
       const supreme = this.finalChoice === 'tech';
-      const rawRange = supreme ? 440 : st.range + (this.heroLevel - 1) * 5 + eq.weapon * 4;
-      const range = c.kind === 'guardiao' && !supreme ? Math.min(rawRange, 95) : rawRange;
+      const rawRange = supreme ? SUPREME_RANGE : st.range + (this.heroLevel - 1) * 5 + eq.weapon * 4;
+      const range = c.kind === 'guardiao' && !supreme ? Math.min(rawRange, 125) : rawRange;
       const speed = st.speed + eq.armor * 8;
 
       let target: Enemy | undefined;
