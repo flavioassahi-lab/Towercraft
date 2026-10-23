@@ -10349,6 +10349,7 @@ class GameScene extends BaseScene {
     this.mana = this.maxMana;
     this.heroLabel.setText(`${this.heroTitle()} · Nv. ${this.heroLevel}`);
     this.restyleAllies();
+    this.rebuildHeroSelector();
 
     this.cameras.main.flash(400, 255, 240, 170);
     this.cameras.main.shake(300, 0.008);
@@ -14816,9 +14817,29 @@ class CityScene extends BaseScene {
     return Math.round(c.base * Math.pow(c.grow, this.count(kind)) * (1 + this.era));
   }
 
-  // Matéria-prima por segundo.
+  // Quanto cada entrega no centro rende. Cada morador visível representa
+  // vários quando a cidade passa de 40 pessoas.
+  private tripYield(): number {
+    const share = this.walkers.length ? Math.max(1, this.pop / this.walkers.length) : 1;
+
+    return Math.round(10 * (1 + 0.25 * this.count('gather')) * share);
+  }
+
+  private deliver(w: Walker) {
+    const n = this.tripYield();
+    const home = this.hasCenter() ? CITY_CENTER : { x: 300, y: 560 };
+
+    this.res += n;
+    w.load.setVisible(false);
+
+    const col = '#' + this.eraInfo().resColor.toString(16).padStart(6, '0');
+
+    this.floatText(home.x + Phaser.Math.Between(-30, 30), home.y - 40, `+${n}`, col, 13);
+  }
+
+  // Média de matéria-prima por segundo (usada para o rendimento fora do jogo).
   private resRate(): number {
-    return this.pop * (1 + 0.25 * this.count('gather'));
+    return this.pop * 0.8 * (1 + 0.25 * this.count('gather'));
   }
 
   // Moedas por minuto (só com o centro de pé).
@@ -15201,7 +15222,7 @@ class CityScene extends BaseScene {
 
     this.hud.setText(`CIDADE · ERA ${e.name}`);
     this.hud2.setText(
-      `${e.res}: ${Math.floor(this.res)}  (+${this.resRate().toFixed(1)}/s)\n` +
+      `${e.res}: ${Math.floor(this.res)}  (+${this.tripYield()} por entrega)\n` +
       `PESSOAS: ${this.pop} / ${this.cap()}\n` +
       (this.raiders.some(r => r.alive) ? 'SOB ATAQUE!' : `PRÓXIMO ATAQUE: ${mm}:${ss}`),
     );
@@ -15409,10 +15430,19 @@ class CityScene extends BaseScene {
       const step = w.speed * (scared ? 1.8 : 1) * dt / 1000;
 
       if (d <= step) {
-        if (!scared) {
-          w.going = !w.going;
-          w.load.setVisible(!w.going);
-          if (w.going) w.node = Math.floor(Math.random() * CITY_NODES.length);
+        if (scared) {
+          // Fugiu para o centro: entrega o que estava carregando.
+          if (w.load.visible) this.deliver(w);
+          w.going = true;
+        } else if (w.going) {
+          // Chegou na matéria-prima: pega e volta.
+          w.going = false;
+          w.load.setVisible(true);
+        } else {
+          // Chegou no centro com a carga: +N.
+          this.deliver(w);
+          w.going = true;
+          w.node = Math.floor(Math.random() * CITY_NODES.length);
         }
       } else {
         w.x += dx / d * step;
@@ -15693,8 +15723,7 @@ class CityScene extends BaseScene {
 
     this.fx.clear();
 
-    // Coleta
-    this.res += this.resRate() * dt / 1000;
+    // A matéria-prima só entra quando um morador a entrega no centro.
 
     // Crescimento: o centro gera um morador a cada 8 s.
     if (this.hasCenter() && this.pop < this.cap() && !this.raiders.length) {
